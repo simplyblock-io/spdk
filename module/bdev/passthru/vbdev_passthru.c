@@ -1138,8 +1138,6 @@ vbdev_passthru_register(const char *bdev_name)
 		// pt_node->offset_start = (pt_node->offset_start * bdev->blocklen) / pt_node->pt_bdev.blocklen;
 		// pt_node->offset_start = 20480;
 		pt_node->pt_bdev.blockcnt -= pt_node->offset_start;
-		// pt_node->malloc_md_buf = spdk_zmalloc((pt_node->pt_bdev.blockcnt * pt_node->md_len) + pt_node->pt_bdev.blocklen, 2 * 1024 * 1024, NULL,
-		// 				    SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
 
 		pt_node->malloc_md_buf = spdk_zmalloc(
 					(pt_node->offset_start * pt_node->pt_bdev.blocklen) + pt_node->pt_bdev.blocklen,

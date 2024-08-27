@@ -1639,7 +1639,7 @@ create_aio_bdev(const char *name, const char *filename, uint32_t block_size, boo
 
 	fdisk->disk.write_cache = 1;
 
-	if(file_cnt) {
+	if(file_cnt > 1) {
 		detected_block_size = file_get_blocklen(fdisk->file_md_array[0].filename);
 	} else {
 		detected_block_size = spdk_fd_get_blocklen(fdisk->fd);

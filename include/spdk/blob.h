@@ -35,6 +35,7 @@
 
 #include "spdk/stdinc.h"
 #include "spdk/assert.h"
+#include "spdk/priority_class.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1256,6 +1257,12 @@ struct spdk_bs_dev *spdk_blob_get_esnap_bs_dev(const struct spdk_blob *blob);
  * \return true if the blob or any snapshots upon which it depends are degraded, else false.
  */
 bool spdk_blob_is_degraded(const struct spdk_blob *blob);
+
+/* Sets the upper NBITS_PRIORITY_CLASS bits of all future logical block addresses to the parent 
+lvol's priority class bits. These bits must be cleared when the I/O reaches the lvolstore and added 
+again when it exits the lvolstore so that no internal lvolstore operation sees these bits.
+*/
+void spdk_blob_set_priority_class(struct spdk_blob *blob, int priority_class);
 
 #ifdef __cplusplus
 }

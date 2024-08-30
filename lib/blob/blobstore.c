@@ -303,6 +303,7 @@ blob_alloc(struct spdk_blob_store *bs, spdk_blob_id id)
 	if (!blob) {
 		return NULL;
 	}
+	blob->priority_class = 0;
 
 	blob->id = id;
 	blob->bs = bs;
@@ -2988,7 +2989,7 @@ blob_request_submit_op_split_next(void *cb_arg, int bserrno)
 		buf = ctx->curr_payload;
 		op_length = spdk_min(length, bs_num_io_units_to_cluster_boundary(blob,
 				     offset));
-
+		
 		/* Update length and payload for next operation */
 		ctx->io_units_remaining -= op_length;
 		ctx->io_unit_offset += op_length;
@@ -3137,6 +3138,8 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 	}
 
 	is_allocated = blob_calculate_lba_and_lba_count(blob, offset, length, &lba, &lba_count);
+	// when ready to do the client I/O, set the priority bits (upper bits) of the logical block address
+	lba = is_allocated ? ((uint64_t)blob->priority_class << PRIORITY_CLASS_BITS_POS) | lba : lba;
 
 	switch (op_type) {
 	case SPDK_BLOB_READ: {
@@ -3286,7 +3289,7 @@ blob_request_submit_op(struct spdk_blob *blob, struct spdk_io_channel *_channel,
 		cb_fn(cb_arg, 0);
 		return;
 	}
-
+	
 	if (offset + length > bs_cluster_to_lba(blob->bs, blob->active.num_clusters)) {
 		cb_fn(cb_arg, -EINVAL);
 		return;
@@ -3341,6 +3344,7 @@ rw_iov_split_next(void *cb_arg, int bserrno)
 
 	io_unit_offset = ctx->io_unit_offset;
 	io_units_to_boundary = bs_num_io_units_to_cluster_boundary(blob, io_unit_offset);
+	
 	io_units_count = spdk_min(ctx->io_units_remaining, io_units_to_boundary);
 	/*
 	 * Get index and offset into the original iov array for our current position in the I/O sequence.
@@ -3459,6 +3463,8 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 		}
 
 		is_allocated = blob_calculate_lba_and_lba_count(blob, offset, length, &lba, &lba_count);
+		// when ready to do the client I/O, set the priority bits (upper bits) of the logical block address
+		lba = is_allocated ? ((uint64_t)blob->priority_class << PRIORITY_CLASS_BITS_POS) | lba : lba;
 
 		if (read) {
 			spdk_bs_sequence_t *seq;
@@ -10294,6 +10300,12 @@ spdk_blob_is_degraded(const struct spdk_blob *blob)
 	}
 
 	return blob->back_bs_dev->is_degraded(blob->back_bs_dev);
+}
+
+void
+spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
+{
+	blob->priority_class = priority_class;
 }
 
 SPDK_LOG_REGISTER_COMPONENT(blob)

@@ -933,6 +933,10 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 {
 	struct raid_bdev_io *raid_io = (struct raid_bdev_io *)bdev_io->driver_ctx;
 
+	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	raid_bdev->priority_class = (bdev_io->u.bdev.offset_blocks & PRIORITY_CLASS_MASK) >> PRIORITY_CLASS_BITS_POS;
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	raid_bdev_io_init(raid_io, spdk_io_channel_get_ctx(ch), bdev_io->type,
 			  bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
 			  bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
@@ -1567,6 +1571,8 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	RAID_FOR_EACH_BASE_BDEV(raid_bdev, base_info) {
 		base_info->raid_bdev = raid_bdev;
 	}
+
+	raid_bdev->priority_class = 0;
 
 	/* strip_size_kb is from the rpc param.  strip_size is in blocks and used
 	 * internally and set later.

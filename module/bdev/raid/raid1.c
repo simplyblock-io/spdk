@@ -51,6 +51,8 @@ raid1_init_ext_io_opts(struct spdk_bdev_ext_io_opts *opts, struct raid_bdev_io *
 static void
 raid1_write_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	if (!success) {
@@ -79,6 +81,8 @@ raid1_get_read_io_base_bdev(struct raid_bdev_io *raid_io)
 static void
 raid1_correct_read_error_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);
@@ -130,6 +134,8 @@ static void raid1_read_other_base_bdev(void *_raid_io);
 static void
 raid1_read_other_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);
@@ -190,6 +196,8 @@ raid1_read_other_base_bdev(void *_raid_io)
 static void
 raid1_read_bdev_io_completion(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);
@@ -425,6 +433,8 @@ raid1_get_io_channel(struct raid_bdev *raid_bdev)
 static void
 raid1_process_write_completed(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
+	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
+
 	struct raid_bdev_process_request *process_req = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);

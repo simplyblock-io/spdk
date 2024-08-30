@@ -8,6 +8,7 @@
 
 #include "spdk/bdev_module.h"
 #include "spdk/uuid.h"
+#include "spdk/priority_class.h"
 
 #define RAID_BDEV_MIN_DATA_OFFSET_SIZE	(1024*1024) /* 1 MiB */
 
@@ -194,6 +195,9 @@ struct raid_bdev {
 
 	/* array of base bdev info */
 	struct raid_base_bdev_info	*base_bdev_info;
+
+	/* priority class of the parent SPDK blob and lvol */
+	int priority_class;
 
 	/* strip size of raid bdev in blocks */
 	uint32_t			strip_size;
@@ -410,8 +414,11 @@ raid_bdev_readv_blocks_ext(struct raid_base_bdev_info *base_info, struct spdk_io
 			   uint64_t num_blocks, spdk_bdev_io_completion_cb cb, void *cb_arg,
 			   struct spdk_bdev_ext_io_opts *opts)
 {
+	const int priority_class = base_info->raid_bdev->priority_class;
+	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+
 	return spdk_bdev_readv_blocks_ext(base_info->desc, ch, iov, iovcnt,
-					  base_info->data_offset + offset_blocks, num_blocks, cb, cb_arg, opts);
+					  priority_blocks, num_blocks, cb, cb_arg, opts);
 }
 
 /**
@@ -435,8 +442,11 @@ raid_bdev_writev_blocks_ext(struct raid_base_bdev_info *base_info, struct spdk_i
 		}
 	}
 
+	const int priority_class = base_info->raid_bdev->priority_class;
+	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | remapped_offset_blocks;
+
 	return spdk_bdev_writev_blocks_ext(base_info->desc, ch, iov, iovcnt,
-					   remapped_offset_blocks, num_blocks, cb, cb_arg, opts);
+					   priority_blocks, num_blocks, cb, cb_arg, opts);
 }
 
 /**
@@ -447,7 +457,10 @@ raid_bdev_unmap_blocks(struct raid_base_bdev_info *base_info, struct spdk_io_cha
 		       uint64_t offset_blocks, uint64_t num_blocks,
 		       spdk_bdev_io_completion_cb cb, void *cb_arg)
 {
-	return spdk_bdev_unmap_blocks(base_info->desc, ch, base_info->data_offset + offset_blocks,
+	const int priority_class = base_info->raid_bdev->priority_class;
+	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+
+	return spdk_bdev_unmap_blocks(base_info->desc, ch, priority_blocks,
 				      num_blocks, cb, cb_arg);
 }
 
@@ -459,7 +472,10 @@ raid_bdev_flush_blocks(struct raid_base_bdev_info *base_info, struct spdk_io_cha
 		       uint64_t offset_blocks, uint64_t num_blocks,
 		       spdk_bdev_io_completion_cb cb, void *cb_arg)
 {
-	return spdk_bdev_flush_blocks(base_info->desc, ch, base_info->data_offset + offset_blocks,
+	const int priority_class = base_info->raid_bdev->priority_class;
+	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+
+	return spdk_bdev_flush_blocks(base_info->desc, ch, priority_blocks,
 				      num_blocks, cb, cb_arg);
 }
 

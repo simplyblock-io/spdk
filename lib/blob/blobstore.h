@@ -104,6 +104,8 @@ struct spdk_blob_list {
 struct spdk_blob {
 	struct spdk_blob_store *bs;
 
+	int priority_class; // to save the lvol's priority class across cluster allocations
+
 	uint32_t	open_ref;
 
 	spdk_blob_id	id;
@@ -528,6 +530,12 @@ bs_lba_to_cluster(struct spdk_blob_store *bs, uint64_t lba)
 	assert(lba % (bs->cluster_sz / bs->dev->blocklen) == 0);
 
 	return lba / (bs->cluster_sz / bs->dev->blocklen);
+}
+
+static inline void
+bs_set_priority_class(struct spdk_blob *blob, int priority_class)
+{
+	blob->priority_class = priority_class;
 }
 
 static inline uint64_t

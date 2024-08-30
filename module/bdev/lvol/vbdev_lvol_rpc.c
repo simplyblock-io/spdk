@@ -282,6 +282,7 @@ struct rpc_bdev_lvol_create {
 	char *uuid;
 	char *lvs_name;
 	char *lvol_name;
+	int lvol_priority_class;
 	uint64_t size_in_mib;
 	bool thin_provision;
 	char *clear_method;
@@ -300,6 +301,7 @@ static const struct spdk_json_object_decoder rpc_bdev_lvol_create_decoders[] = {
 	{"uuid", offsetof(struct rpc_bdev_lvol_create, uuid), spdk_json_decode_string, true},
 	{"lvs_name", offsetof(struct rpc_bdev_lvol_create, lvs_name), spdk_json_decode_string, true},
 	{"lvol_name", offsetof(struct rpc_bdev_lvol_create, lvol_name), spdk_json_decode_string},
+	{"lvol_priority_class", offsetof(struct rpc_bdev_lvol_create, lvol_priority_class), spdk_json_decode_int32, true},
 	{"size_in_mib", offsetof(struct rpc_bdev_lvol_create, size_in_mib), spdk_json_decode_uint64},
 	{"thin_provision", offsetof(struct rpc_bdev_lvol_create, thin_provision), spdk_json_decode_bool, true},
 	{"clear_method", offsetof(struct rpc_bdev_lvol_create, clear_method), spdk_json_decode_string, true},
@@ -330,6 +332,7 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		     const struct spdk_json_val *params)
 {
 	struct rpc_bdev_lvol_create req = {};
+	req.lvol_priority_class = 0;
 	enum lvol_clear_method clear_method;
 	int rc = 0;
 	struct spdk_lvol_store *lvs = NULL;
@@ -366,8 +369,8 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		clear_method = LVOL_CLEAR_WITH_DEFAULT;
 	}
 
-	rc = vbdev_lvol_create(lvs, req.lvol_name, req.size_in_mib * 1024 * 1024,
-			       req.thin_provision, clear_method, rpc_bdev_lvol_create_cb, request);
+	rc = vbdev_lvol_create_with_priority_class(lvs, req.lvol_name, req.size_in_mib * 1024 * 1024,
+			       req.thin_provision, clear_method, req.lvol_priority_class, rpc_bdev_lvol_create_cb, request);
 	if (rc < 0) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));
 		goto cleanup;
@@ -1648,4 +1651,55 @@ cleanup:
 }
 
 SPDK_RPC_REGISTER("bdev_lvol_set_parent_bdev", rpc_bdev_lvol_set_parent_bdev,
+		  SPDK_RPC_RUNTIME)
+
+struct rpc_bdev_lvol_set_priority_class {
+	char* lvol_name;
+	int lvol_priority_class;
+};
+
+static void 
+free_rpc_bdev_lvol_set_priority_class(struct rpc_bdev_lvol_set_priority_class *req) {
+	free(req->lvol_name);
+}
+
+static const struct spdk_json_object_decoder rpc_bdev_lvol_set_priority_class_decoders[] = {
+	{"lvol_name", offsetof(struct rpc_bdev_lvol_set_priority_class, lvol_name), spdk_json_decode_string},
+	{"lvol_priority_class", offsetof(struct rpc_bdev_lvol_set_priority_class, lvol_priority_class), spdk_json_decode_int32}
+};
+
+void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
+			      const struct spdk_json_val *params) 
+{
+	struct rpc_bdev_lvol_set_priority_class req = {};
+	struct spdk_lvol *lvol;
+	struct spdk_bdev *lvol_bdev;
+
+	SPDK_INFOLOG(lvol_rpc, "Set priority_class of lvol\n");
+
+	if (spdk_json_decode_object(params, rpc_bdev_lvol_set_priority_class_decoders,
+				    SPDK_COUNTOF(rpc_bdev_lvol_set_priority_class_decoders),
+				    &req)) {
+		SPDK_INFOLOG(lvol_rpc, "spdk_json_decode_object failed\n");
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "spdk_json_decode_object failed");
+		goto cleanup;
+	}
+
+	lvol_bdev = spdk_bdev_get_by_name(req.lvol_name);
+	if (lvol_bdev == NULL) {
+		SPDK_ERRLOG("lvol bdev '%s' does not exist\n", req.lvol_name);
+		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
+		goto cleanup;
+	}
+
+	lvol = vbdev_lvol_get_from_bdev(lvol_bdev);
+	lvol->priority_class = req.lvol_priority_class;
+	vbdev_lvol_set_priority_class_blocks(lvol);
+
+cleanup:
+	free_rpc_bdev_lvol_set_priority_class(&req);
+}
+
+SPDK_RPC_REGISTER("bdev_lvol_set_priority_class", rpc_bdev_lvol_set_priority_class,
 		  SPDK_RPC_RUNTIME)

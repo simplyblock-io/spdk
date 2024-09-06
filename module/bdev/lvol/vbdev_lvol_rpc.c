@@ -1694,6 +1694,11 @@ void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 	}
 
 	lvol = vbdev_lvol_get_from_bdev(lvol_bdev);
+	if (lvol == NULL) {
+		SPDK_ERRLOG("lvol does not exist\n");
+		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
+		goto cleanup;
+	}
 	lvol->priority_class = req.lvol_priority_class;
 	vbdev_lvol_set_priority_class_blocks(lvol);
 

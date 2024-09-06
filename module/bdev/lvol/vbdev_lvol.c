@@ -13,8 +13,6 @@
 
 #include "vbdev_lvol.h"
 
-#include "request.h"
-
 struct vbdev_lvol_io {
 	struct spdk_blob_ext_io_opts ext_io_opts;
 };

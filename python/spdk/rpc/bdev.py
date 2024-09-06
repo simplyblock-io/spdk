@@ -449,7 +449,7 @@ def bdev_raid_remove_base_bdev(client, name):
     return client.call('bdev_raid_remove_base_bdev', params)
 
 
-def bdev_aio_create(client, filename, name, block_size=None, readonly=None, fallocate=None):
+def bdev_aio_create(client, filename, name, block_size=None, readonly=False, fallocate=False, disk_sz=0, sz_per_file=0, filled=False):
     """Construct a Linux AIO block device.
     Args:
         filename: path to device or file (ex: /dev/sda)
@@ -469,6 +469,16 @@ def bdev_aio_create(client, filename, name, block_size=None, readonly=None, fall
         params['readonly'] = readonly
     if fallocate is not None:
         params['fallocate'] = fallocate
+    
+    if disk_sz:
+        params['disk_sz'] = disk_sz
+        
+    if sz_per_file:
+        params['sz_per_file'] = sz_per_file
+        
+    if filled:
+        params['filled'] = filled
+
     return client.call('bdev_aio_create', params)
 
 
@@ -1260,7 +1270,7 @@ def bdev_iscsi_delete(client, name):
     return client.call('bdev_iscsi_delete', params)
 
 
-def bdev_passthru_create(client, base_bdev_name, name, uuid=None):
+def bdev_passthru_create(client, base_bdev_name, name, uuid=None, block_sz=0, md_sz = 0, reset = 1):
     """Construct a pass-through block device.
     Args:
         base_bdev_name: name of the existing bdev
@@ -1274,6 +1284,11 @@ def bdev_passthru_create(client, base_bdev_name, name, uuid=None):
     params['name'] = name
     if uuid is not None:
         params['uuid'] = uuid
+    if block_sz:
+        params['block_sz'] = block_sz
+    if md_sz:
+        params['md_sz'] = md_sz
+    params['mode'] = reset 
     return client.call('bdev_passthru_create', params)
 
 

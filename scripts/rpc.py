@@ -504,7 +504,11 @@ if __name__ == "__main__":
                                             name=args.name,
                                             block_size=args.block_size,
                                             readonly=args.readonly,
-                                            fallocate=args.fallocate))
+                                            fallocate=args.fallocate,
+                                            disk_sz=args.disk_sz,
+                                            sz_per_file=args.sz_per_file,
+                                            filled=args.filled))
+        
 
     p = subparsers.add_parser('bdev_aio_create', help='Add a bdev with aio backend')
     p.add_argument('filename', help='Path to device or file (ex: /dev/sda)')
@@ -512,6 +516,9 @@ if __name__ == "__main__":
     p.add_argument('block_size', help='Block size for this bdev', type=int, nargs='?')
     p.add_argument("-r", "--readonly", action='store_true', help='Set this bdev as read-only')
     p.add_argument("--fallocate", action='store_true', help='Support unmap/writezeros by fallocate')
+    p.add_argument("-d", '--disk_sz', help='disk_sz size for this bdev', type=int)
+    p.add_argument("-s", '--sz_per_file', help='sz_per_file size for this bdev', type=int)
+    p.add_argument("-f", "--filled", action='store_true', help='Allocate the file with zeros when it is first opened')
     p.set_defaults(func=bdev_aio_create)
 
     def bdev_aio_rescan(args):
@@ -1217,12 +1224,18 @@ if __name__ == "__main__":
         print_json(rpc.bdev.bdev_passthru_create(args.client,
                                                  base_bdev_name=args.base_bdev_name,
                                                  name=args.name,
-                                                 uuid=args.uuid))
+                                                 uuid=args.uuid,
+                                                 block_sz=args.block_sz,                                                 
+                                                 md_sz=args.md_sz,
+                                                 reset=args.reset))
 
     p = subparsers.add_parser('bdev_passthru_create', help='Add a pass through bdev on existing bdev')
     p.add_argument('-b', '--base-bdev-name', help="Name of the existing bdev", required=True)
     p.add_argument('-p', '--name', help="Name of the pass through bdev", required=True)
     p.add_argument('-u', '--uuid', help="UUID of the bdev")
+    p.add_argument('-s', '--block_sz', type=int, help="Block size of the passthru bdev")
+    p.add_argument('-m', '--md-sz', type=int, help='Metadata size for this bdev (0, 8, 16, 32, 64, or 128). Default is 0.')
+    p.add_argument('-r', '--reset', type=int, help='reset Metadata region for this bdev (0 or 1). Default is 1.')
     p.set_defaults(func=bdev_passthru_create)
 
     def bdev_passthru_delete(args):

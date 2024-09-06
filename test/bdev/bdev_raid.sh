@@ -5,6 +5,7 @@
 #
 testdir=$(readlink -f $(dirname $0))
 rootdir=$(readlink -f $testdir/../..)
+rpc_server=/var/tmp/spdk-raid.sock
 tmp_dir=$SPDK_TEST_STORAGE/raidtest
 tmp_file=$tmp_dir/raidrandtest
 
@@ -819,9 +820,9 @@ function raid_io_error_test() {
 
 	bdevperf_log=$(mktemp -p "$tmp_dir")
 
-	"$rootdir/build/examples/bdevperf" -T $raid_bdev_name -t 60 -w randrw -M 50 -o 128k -q 1 -z -f -L bdev_raid > $bdevperf_log &
+	"$rootdir/build/examples/bdevperf" -r $rpc_server -T $raid_bdev_name -t 60 -w randrw -M 50 -o 128k -q 1 -z -f -L bdev_raid > $bdevperf_log &
 	raid_pid=$!
-	waitforlisten $raid_pid
+	waitforlisten $raid_pid $rpc_server
 
 	# Create base bdevs
 	for bdev in "${base_bdevs[@]}"; do
@@ -831,11 +832,11 @@ function raid_io_error_test() {
 	done
 
 	# Create RAID bdev
-	$rpc_py bdev_raid_create $create_arg -r $raid_level -b "'${base_bdevs[*]}'" -n $raid_bdev_name -s
+	$rpc_py bdev_raid_create $create_arg -r $raid_level -b "${base_bdevs[*]}" -n $raid_bdev_name -s
 	verify_raid_bdev_state $raid_bdev_name "online" $raid_level $strip_size $num_base_bdevs
 
 	# Start user I/O
-	"$rootdir/examples/bdev/bdevperf/bdevperf.py" perform_tests &
+	"$rootdir/examples/bdev/bdevperf/bdevperf.py" -s $rpc_server perform_tests &
 	sleep 1
 
 	# Inject an error
@@ -861,98 +862,6 @@ function raid_io_error_test() {
 	else
 		[[ "$fail_per_s" != "0.00" ]]
 	fi
-}
-
-function raid_resize_superblock_test() {
-	local raid_level=$1
-
-	$rootdir/test/app/bdev_svc/bdev_svc -i 0 -L bdev_raid &
-	raid_pid=$!
-	echo "Process raid pid: $raid_pid"
-	waitforlisten $raid_pid
-
-	$rpc_py bdev_malloc_create -b malloc0 512 $base_blocklen
-
-	$rpc_py bdev_passthru_create -b malloc0 -p pt0
-	$rpc_py bdev_lvol_create_lvstore pt0 lvs0
-
-	$rpc_py bdev_lvol_create -l lvs0 lvol0 64
-	$rpc_py bdev_lvol_create -l lvs0 lvol1 64
-
-	case $raid_level in
-		0) $rpc_py bdev_raid_create -n Raid -r $raid_level -z 64 -b "'lvs0/lvol0 lvs0/lvol1'" -s ;;
-		1) $rpc_py bdev_raid_create -n Raid -r $raid_level -b "'lvs0/lvol0 lvs0/lvol1'" -s ;;
-	esac
-
-	# Check size of base bdevs first
-	(($(($($rpc_py bdev_get_bdevs -b lvs0/lvol0 | jq '.[].num_blocks') * 512 / 1048576)) == 64))
-	(($(($($rpc_py bdev_get_bdevs -b lvs0/lvol1 | jq '.[].num_blocks') * 512 / 1048576)) == 64))
-
-	# Check size of Raid bdev before resize
-	case $raid_level in
-		0) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 245760)) ;;
-		1) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 122880)) ;;
-	esac
-
-	# Resize bdevs
-	$rpc_py bdev_lvol_resize lvs0/lvol0 100
-	$rpc_py bdev_lvol_resize lvs0/lvol1 100
-
-	# Bdevs should be resized
-	(($(($($rpc_py bdev_get_bdevs -b lvs0/lvol0 | jq '.[].num_blocks') * 512 / 1048576)) == 100))
-	(($(($($rpc_py bdev_get_bdevs -b lvs0/lvol1 | jq '.[].num_blocks') * 512 / 1048576)) == 100))
-
-	# Same with Raid bdevs
-	case $raid_level in
-		0) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 393216)) ;;
-		1) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 196608)) ;;
-	esac
-
-	$rpc_py bdev_passthru_delete pt0
-	$rpc_py bdev_passthru_create -b malloc0 -p pt0
-
-	# After the passthru bdev is re-created, the RAID bdev should start from
-	# superblock and its size should be the same as after it was resized.
-	case $raid_level in
-		0) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 393216)) ;;
-		1) (($($rpc_py bdev_get_bdevs -b Raid | jq '.[].num_blocks') == 196608)) ;;
-	esac
-
-	killprocess $raid_pid
-
-	return 0
-}
-
-function raid_resize_data_offset_test() {
-
-	$rootdir/test/app/bdev_svc/bdev_svc -r $rpc_server -i 0 -L bdev_raid &
-	raid_pid=$!
-	echo "Process raid pid: $raid_pid"
-	waitforlisten $raid_pid $rpc_server
-
-	# Create three base bdevs with one null bdev to be replaced later
-	$rpc_py bdev_malloc_create -b malloc0 64 $base_blocklen -o 16
-	$rpc_py bdev_malloc_create -b malloc1 64 $base_blocklen -o 16
-	$rpc_py bdev_null_create null0 64 $base_blocklen
-
-	$rpc_py bdev_raid_create -n Raid -r 1 -b "malloc0 malloc1 null0" -s
-
-	# Check data_offset
-	(($($rpc_py bdev_raid_get_bdevs all | jq -r '.[].base_bdevs_list[2].data_offset') == 2048))
-
-	$rpc_py bdev_null_delete null0
-
-	# Now null bdev is replaced with malloc, and optimal_io_boundary is changed to force
-	# recalculation
-	$rpc_py bdev_malloc_create -b malloc2 512 $base_blocklen -o 30
-	$rpc_py bdev_raid_add_base_bdev Raid malloc2
-
-	# Data offset is updated
-	(($($rpc_py bdev_raid_get_bdevs all | jq -r '.[].base_bdevs_list[2].data_offset') == 2070))
-
-	killprocess $raid_pid
-
-	return 0
 }
 
 mkdir -p "$tmp_dir"

@@ -189,5 +189,30 @@ bdev_connect -b "nvme0" --dhchap-key "key0"
 [[ $(hostrpc bdev_nvme_get_controllers | jq -r '.[].name') == "nvme0" ]]
 hostrpc bdev_nvme_detach_controller nvme0
 
+# Check that the authentication fails when the host wants to authenticate the target (i.e. user set
+# the dhchap_ctrlr_key), but the target doesn't require authentication
+hostrpc bdev_nvme_set_options \
+	--dhchap-digests \
+	"$(
+		IFS=,
+		printf "%s" "${digests[*]}"
+	)" \
+	--dhchap-dhgroups \
+	"$(
+		IFS=,
+		printf "%s" "${dhgroups[*]}"
+	)"
+rpc_cmd nvmf_subsystem_remove_host "$subnqn" "$hostnqn"
+rpc_cmd nvmf_subsystem_add_host "$subnqn" "$hostnqn"
+NOT hostrpc bdev_nvme_attach_controller -b nvme0 -t "$TEST_TRANSPORT" -f ipv4 \
+	-a "$NVMF_FIRST_TARGET_IP" -s "$NVMF_PORT" -q "$hostnqn" -n "$subnqn" \
+	--dhchap-key "key0" --dhchap-ctrlr-key "key1"
+# But it's fine when the host key is set and the controller key is not
+hostrpc bdev_nvme_attach_controller -b nvme0 -t "$TEST_TRANSPORT" -f ipv4 \
+	-a "$NVMF_FIRST_TARGET_IP" -s "$NVMF_PORT" -q "$hostnqn" -n "$subnqn" \
+	--dhchap-key "key0"
+[[ $(hostrpc bdev_nvme_get_controllers | jq -r '.[].name') == "nvme0" ]]
+hostrpc bdev_nvme_detach_controller nvme0
+
 trap - SIGINT SIGTERM EXIT
 cleanup

@@ -282,7 +282,7 @@ struct rpc_bdev_lvol_create {
 	char *uuid;
 	char *lvs_name;
 	char *lvol_name;
-	int lvol_priority_class;
+	int32_t lvol_priority_class;
 	uint64_t size_in_mib;
 	bool thin_provision;
 	char *clear_method;
@@ -1655,7 +1655,7 @@ SPDK_RPC_REGISTER("bdev_lvol_set_parent_bdev", rpc_bdev_lvol_set_parent_bdev,
 
 struct rpc_bdev_lvol_set_priority_class {
 	char* lvol_name;
-	int lvol_priority_class;
+	int32_t lvol_priority_class;
 };
 
 static void 

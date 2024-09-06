@@ -12,8 +12,6 @@
 #include "spdk/blob_bdev.h"
 #include "spdk/priority_class.h"
 
-#include "request.h"
-
 #include "spdk_internal/lvolstore.h"
 
 struct lvol_store_bdev {

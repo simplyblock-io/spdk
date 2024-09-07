@@ -3138,8 +3138,6 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 	}
 
 	is_allocated = blob_calculate_lba_and_lba_count(blob, offset, length, &lba, &lba_count);
-	// when ready to do the client I/O, set the priority bits (upper bits) of the logical block address
-	lba = is_allocated ? ((uint64_t)blob->priority_class << PRIORITY_CLASS_BITS_POS) | lba : lba;
 
 	switch (op_type) {
 	case SPDK_BLOB_READ: {
@@ -3153,6 +3151,7 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 
 		if (is_allocated) {
 			/* Read from the blob */
+			batch->priority_class = blob->priority_class;
 			bs_batch_read_dev(batch, payload, lba, lba_count);
 		} else {
 			/* Read from the backing block device */
@@ -3179,6 +3178,7 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 				return;
 			}
 
+			batch->priority_class = blob->priority_class;
 			if (op_type == SPDK_BLOB_WRITE) {
 				bs_batch_write_dev(batch, payload, lba, lba_count);
 			} else {
@@ -3259,6 +3259,7 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 		}
 
 		if (is_allocated) {
+			batch->priority_class = blob->priority_class;
 			bs_batch_unmap_dev(batch, lba, lba_count);
 		}
 
@@ -3463,8 +3464,6 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 		}
 
 		is_allocated = blob_calculate_lba_and_lba_count(blob, offset, length, &lba, &lba_count);
-		// when ready to do the client I/O, set the priority bits (upper bits) of the logical block address
-		lba = is_allocated ? ((uint64_t)blob->priority_class << PRIORITY_CLASS_BITS_POS) | lba : lba;
 
 		if (read) {
 			spdk_bs_sequence_t *seq;
@@ -3478,6 +3477,7 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 			seq->ext_io_opts = ext_io_opts;
 
 			if (is_allocated) {
+				seq->priority_class = blob->priority_class;
 				bs_sequence_readv_dev(seq, iov, iovcnt, lba, lba_count, rw_iov_done, NULL);
 			} else {
 				bs_sequence_readv_bs_dev(seq, blob->back_bs_dev, iov, iovcnt, lba, lba_count,
@@ -3495,6 +3495,7 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 
 				seq->ext_io_opts = ext_io_opts;
 
+				seq->priority_class = blob->priority_class;
 				bs_sequence_writev_dev(seq, iov, iovcnt, lba, lba_count, rw_iov_done, NULL);
 			} else {
 				/* Queue this operation and allocate the cluster */
@@ -10306,6 +10307,7 @@ void
 spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
 {
 	blob->priority_class = priority_class;
+	//blob->
 }
 
 SPDK_LOG_REGISTER_COMPONENT(blob)

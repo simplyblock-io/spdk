@@ -92,6 +92,7 @@ bs_sequence_start(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl,
 	set->channel = channel;
 	set->back_channel = back_channel;
 
+	set->priority_class = 0;
 	set->cb_args.cb_fn = bs_sequence_completion;
 	set->cb_args.cb_arg = set;
 	set->cb_args.channel = channel->dev_channel;
@@ -162,7 +163,6 @@ bs_sequence_read_dev(spdk_bs_sequence_t *seq, void *payload,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
-
 	channel->dev->read(channel->dev, channel->dev_channel, payload, lba, lba_count, &set->cb_args);
 }
 
@@ -219,6 +219,8 @@ bs_sequence_readv_dev(spdk_bs_sequence_t *seq, struct iovec *iov, int iovcnt,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
+	
 	if (set->ext_io_opts) {
 		assert(channel->dev->readv_ext);
 		channel->dev->readv_ext(channel->dev, channel->dev_channel, iov, iovcnt, lba, lba_count,
@@ -241,6 +243,7 @@ bs_sequence_writev_dev(spdk_bs_sequence_t *seq, struct iovec *iov, int iovcnt,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
 
 	if (set->ext_io_opts) {
 		assert(channel->dev->writev_ext);
@@ -356,6 +359,7 @@ bs_batch_open(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl, struct 
 	set->u.batch.outstanding_ops = 0;
 	set->u.batch.batch_closed = 0;
 
+	set->priority_class = 0;
 	set->cb_args.cb_fn = bs_batch_completion;
 	set->cb_args.cb_arg = set;
 	set->cb_args.channel = channel->dev_channel;
@@ -388,6 +392,7 @@ bs_batch_read_dev(spdk_bs_batch_t *batch, void *payload,
 		      lba);
 
 	set->u.batch.outstanding_ops++;
+	channel->dev->priority_class = batch->priority_class;
 	channel->dev->read(channel->dev, channel->dev_channel, payload, lba, lba_count, &set->cb_args);
 }
 
@@ -401,6 +406,7 @@ bs_batch_write_dev(spdk_bs_batch_t *batch, void *payload,
 	SPDK_DEBUGLOG(blob_rw, "Writing %" PRIu32 " blocks to LBA %" PRIu64 "\n", lba_count, lba);
 
 	set->u.batch.outstanding_ops++;
+	channel->dev->priority_class = batch->priority_class;
 	channel->dev->write(channel->dev, channel->dev_channel, payload, lba, lba_count,
 			    &set->cb_args);
 }
@@ -416,6 +422,7 @@ bs_batch_unmap_dev(spdk_bs_batch_t *batch,
 		      lba);
 
 	set->u.batch.outstanding_ops++;
+	channel->dev->priority_class = batch->priority_class;
 	channel->dev->unmap(channel->dev, channel->dev_channel, lba, lba_count,
 			    &set->cb_args);
 }
@@ -430,6 +437,7 @@ bs_batch_write_zeroes_dev(spdk_bs_batch_t *batch,
 	SPDK_DEBUGLOG(blob_rw, "Zeroing %" PRIu64 " blocks at LBA %" PRIu64 "\n", lba_count, lba);
 
 	set->u.batch.outstanding_ops++;
+	channel->dev->priority_class = batch->priority_class;
 	channel->dev->write_zeroes(channel->dev, channel->dev_channel, lba, lba_count,
 				   &set->cb_args);
 }

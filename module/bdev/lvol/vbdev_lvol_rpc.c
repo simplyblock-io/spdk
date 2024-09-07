@@ -1668,6 +1668,23 @@ static const struct spdk_json_object_decoder rpc_bdev_lvol_set_priority_class_de
 	{"lvol_priority_class", offsetof(struct rpc_bdev_lvol_set_priority_class, lvol_priority_class), spdk_json_decode_int32}
 };
 
+static void
+rpc_bdev_lvol_set_priority_class_cb(void *cb_arg, int lvolerrno)
+{
+	struct spdk_jsonrpc_request *request = cb_arg;
+
+	if (lvolerrno != 0) {
+		goto invalid;
+	}
+
+	spdk_jsonrpc_send_bool_response(request, true);
+	return;
+
+invalid:
+	spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INVALID_PARAMS,
+					 spdk_strerror(-lvolerrno));
+}
+
 void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 			      const struct spdk_json_val *params) 
 {
@@ -1699,8 +1716,10 @@ void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 		spdk_jsonrpc_send_error_response(request, -ENODEV, spdk_strerror(ENODEV));
 		goto cleanup;
 	}
+
 	lvol->priority_class = req.lvol_priority_class;
 	vbdev_lvol_set_priority_class_blocks(lvol);
+	rpc_bdev_lvol_set_priority_class_cb(request, 0);
 
 cleanup:
 	free_rpc_bdev_lvol_set_priority_class(&req);

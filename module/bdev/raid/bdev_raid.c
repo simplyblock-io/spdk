@@ -599,7 +599,7 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 		 * split I/O (the higher LBAs). Then, we submit the second part and set offset to 0.
 		 */
 		if (raid_io->split.offset != 0) {
-			raid_io->offset_blocks = bdev_io->u.bdev.offset_blocks;
+			raid_io->offset_blocks = bdev_io->u.bdev.offset_blocks & MASK_OUT_PRIORITY_CLASS;
 			raid_io->md_buf = bdev_io->u.bdev.md_buf;
 
 			if (status == SPDK_BDEV_IO_STATUS_SUCCESS) {
@@ -639,7 +639,7 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 
 			rc = raid_bdev_remap_dix_reftag(bdev_io->u.bdev.md_buf,
 							bdev_io->u.bdev.num_blocks, bdev_io->bdev,
-							bdev_io->u.bdev.offset_blocks);
+							bdev_io->u.bdev.offset_blocks & MASK_OUT_PRIORITY_CLASS);
 			if (rc != 0) {
 				status = SPDK_BDEV_IO_STATUS_FAILED;
 			}
@@ -919,10 +919,9 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
 	raid_bdev->priority_class = (bdev_io->u.bdev.offset_blocks & PRIORITY_CLASS_MASK) >> PRIORITY_CLASS_BITS_POS;
-	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
 
 	raid_bdev_io_init(raid_io, spdk_io_channel_get_ctx(ch), bdev_io->type,
-			  bdev_io->u.bdev.offset_blocks, bdev_io->u.bdev.num_blocks,
+			  bdev_io->u.bdev.offset_blocks & MASK_OUT_PRIORITY_CLASS, bdev_io->u.bdev.num_blocks,
 			  bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
 			  bdev_io->u.bdev.memory_domain, bdev_io->u.bdev.memory_domain_ctx);
 

@@ -532,12 +532,6 @@ bs_lba_to_cluster(struct spdk_blob_store *bs, uint64_t lba)
 	return lba / (bs->cluster_sz / bs->dev->blocklen);
 }
 
-static inline void
-bs_set_priority_class(struct spdk_blob *blob, int priority_class)
-{
-	blob->priority_class = priority_class;
-}
-
 static inline uint64_t
 bs_io_unit_to_back_dev_lba(struct spdk_blob *blob, uint64_t io_unit)
 {

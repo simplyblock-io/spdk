@@ -384,8 +384,6 @@ raid5f_stripe_request_chunk_read_complete(struct stripe_request *stripe_req,
 static void
 raid5f_chunk_complete_bdev_io(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
-	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
-
 	struct chunk *chunk = cb_arg;
 	struct stripe_request *stripe_req = raid5f_chunk_stripe_req(chunk);
 	enum spdk_bdev_io_status status = success ? SPDK_BDEV_IO_STATUS_SUCCESS :
@@ -660,8 +658,6 @@ raid5f_submit_write_request(struct raid_bdev_io *raid_io, uint64_t stripe_index)
 static void
 raid5f_chunk_read_complete(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
-	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
-
 	struct raid_bdev_io *raid_io = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);
@@ -1147,8 +1143,6 @@ raid5f_get_io_channel(struct raid_bdev *raid_bdev)
 static void
 raid5f_process_write_completed(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
-	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
-
 	struct raid_bdev_process_request *process_req = cb_arg;
 
 	spdk_bdev_free_io(bdev_io);

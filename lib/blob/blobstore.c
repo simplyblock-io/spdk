@@ -10301,7 +10301,6 @@ void
 spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
 {
 	blob->priority_class = priority_class;
-	//blob->
 }
 
 SPDK_LOG_REGISTER_COMPONENT(blob)

@@ -130,7 +130,9 @@ bs_sequence_start_blob(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl
 			return NULL;
 		}
 	}
-	return bs_sequence_start(_channel, cpl, esnap_ch);
+	spdk_bs_sequence_t *seq = bs_sequence_start(_channel, cpl, esnap_ch);
+	seq->priority_class = blob->priority_class;
+	return seq;
 }
 
 void
@@ -163,6 +165,8 @@ bs_sequence_read_dev(spdk_bs_sequence_t *seq, void *payload,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
+
 	channel->dev->read(channel->dev, channel->dev_channel, payload, lba, lba_count, &set->cb_args);
 }
 
@@ -179,6 +183,7 @@ bs_sequence_write_dev(spdk_bs_sequence_t *seq, void *payload,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
 
 	channel->dev->write(channel->dev, channel->dev_channel, payload, lba, lba_count,
 			    &set->cb_args);
@@ -268,6 +273,7 @@ bs_sequence_write_zeroes_dev(spdk_bs_sequence_t *seq,
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
 
 	channel->dev->write_zeroes(channel->dev, channel->dev_channel, lba, lba_count,
 				   &set->cb_args);
@@ -285,6 +291,7 @@ bs_sequence_copy_dev(spdk_bs_sequence_t *seq, uint64_t dst_lba, uint64_t src_lba
 
 	set->u.sequence.cb_fn = cb_fn;
 	set->u.sequence.cb_arg = cb_arg;
+	channel->dev->priority_class = seq->priority_class;
 
 	channel->dev->copy(channel->dev, channel->dev_channel, dst_lba, src_lba, lba_count, &set->cb_args);
 }
@@ -359,7 +366,7 @@ bs_batch_open(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl, struct 
 	set->u.batch.outstanding_ops = 0;
 	set->u.batch.batch_closed = 0;
 
-	set->priority_class = 0;
+	set->priority_class = blob->priority_class;
 	set->cb_args.cb_fn = bs_batch_completion;
 	set->cb_args.cb_arg = set;
 	set->cb_args.channel = channel->dev_channel;

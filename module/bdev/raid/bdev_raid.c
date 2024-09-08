@@ -933,13 +933,13 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 {
 	struct raid_bdev_io *raid_io = (struct raid_bdev_io *)bdev_io->driver_ctx;
 
-	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
-	raid_bdev->priority_class = (bdev_io->u.bdev.offset_blocks & PRIORITY_CLASS_MASK) >> PRIORITY_CLASS_BITS_POS;
-
 	raid_bdev_io_init(raid_io, spdk_io_channel_get_ctx(ch), bdev_io->type,
 			  bdev_io->u.bdev.offset_blocks & MASK_OUT_PRIORITY_CLASS, bdev_io->u.bdev.num_blocks,
 			  bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
 			  bdev_io->u.bdev.memory_domain, bdev_io->u.bdev.memory_domain_ctx);
+
+	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	raid_bdev->priority_class = (bdev_io->u.bdev.offset_blocks & PRIORITY_CLASS_MASK) >> PRIORITY_CLASS_BITS_POS;
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:

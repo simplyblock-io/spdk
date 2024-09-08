@@ -1612,6 +1612,7 @@ blob_load_cpl_extents_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		}
 	}
 
+	seq->priority_class = blob->priority_class;
 	for (i = ctx->next_extent_page; i < blob->active.num_extent_pages; i++) {
 		if (blob->active.extent_pages[i] != 0) {
 			/* Extent page was allocated, read and parse it. */
@@ -1682,6 +1683,7 @@ blob_load_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		return;
 	}
 
+	seq->priority_class = blob->priority_class;
 	if (page->next != SPDK_INVALID_MD_PAGE) {
 		struct spdk_blob_md_page *tmp_pages;
 		uint32_t next_page = page->next;
@@ -1773,6 +1775,7 @@ blob_load(spdk_bs_sequence_t *seq, struct spdk_blob *blob,
 	lba = bs_md_page_to_lba(blob->bs, page_num);
 
 	blob->state = SPDK_BLOB_STATE_LOADING;
+	seq->priority_class = blob->priority_class;
 
 	bs_sequence_read_dev(seq, &ctx->pages[0], lba,
 			     bs_byte_to_lba(bs, SPDK_BS_PAGE_SIZE),
@@ -1796,6 +1799,7 @@ static void
 bs_batch_clear_dev(struct spdk_blob *blob, spdk_bs_batch_t *batch, uint64_t lba,
 		   uint64_t lba_count)
 {
+	batch->priority_class = blob->priority_class;
 	switch (blob->clear_method) {
 	case BLOB_CLEAR_WITH_DEFAULT:
 	case BLOB_CLEAR_WITH_UNMAP:
@@ -1896,6 +1900,7 @@ blob_persist_complete(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx *ctx
 	next_persist = TAILQ_FIRST(&blob->persists_to_complete);
 
 	blob->state = SPDK_BLOB_STATE_DIRTY;
+	seq->priority_class = blob->priority_class;
 	bs_mark_dirty(seq, blob->bs, blob_persist_start, next_persist);
 }
 
@@ -1940,6 +1945,7 @@ blob_persist_clear_extents_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrn
 		blob->active.extent_pages_array_size = blob->active.num_extent_pages;
 	}
 
+	seq->priority_class = blob->priority_class;
 	blob_persist_complete(seq, ctx, bserrno);
 }
 
@@ -1954,6 +1960,7 @@ blob_persist_clear_extents(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx
 	spdk_bs_batch_t                 *batch;
 
 	batch = bs_sequence_to_batch(seq, blob_persist_clear_extents_cpl, ctx);
+	batch->priority_class = blob->priority_class;
 	lba_count = bs_byte_to_lba(bs, SPDK_BS_PAGE_SIZE);
 
 	/* Clear all extent_pages that were truncated */
@@ -2009,6 +2016,7 @@ blob_persist_clear_clusters_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserr
 #endif
 		blob->active.cluster_array_size = blob->active.num_clusters;
 	}
+	seq->priority_class = blob->priority_class;
 
 	/* Move on to clearing extent pages */
 	blob_persist_clear_extents(seq, ctx);
@@ -2029,6 +2037,7 @@ blob_persist_clear_clusters(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ct
 	 */
 
 	batch = bs_sequence_to_batch(seq, blob_persist_clear_clusters_cpl, ctx);
+	batch->priority_class = blob->priority_class;
 
 	/* Clear all clusters that were truncated */
 	lba = 0;
@@ -2100,6 +2109,7 @@ blob_persist_zero_pages_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	}
 
 	spdk_spin_unlock(&bs->used_lock);
+	seq->priority_class = blob->priority_class;
 
 	/* Move on to clearing clusters */
 	blob_persist_clear_clusters(seq, ctx);
@@ -2122,6 +2132,7 @@ blob_persist_zero_pages(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	}
 
 	batch = bs_sequence_to_batch(seq, blob_persist_zero_pages_cpl, ctx);
+	batch->priority_class = blob->priority_class;
 
 	lba_count = bs_byte_to_lba(bs, SPDK_BS_PAGE_SIZE);
 
@@ -2158,6 +2169,8 @@ blob_persist_write_page_root(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	uint64_t			lba;
 	uint32_t			lba_count;
 	struct spdk_blob_md_page	*page;
+
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno != 0) {
 		blob_persist_complete(seq, ctx, bserrno);
@@ -2198,6 +2211,7 @@ blob_persist_write_page_chain(spdk_bs_sequence_t *seq, struct spdk_blob_persist_
 	lba_count = bs_byte_to_lba(bs, sizeof(*page));
 
 	batch = bs_sequence_to_batch(seq, blob_persist_write_page_root, ctx);
+	batch->priority_class = blob->priority_class;
 
 	/* This starts at 1. The root page is not written until
 	 * all of the others are finished
@@ -2350,6 +2364,8 @@ blob_persist_generate_new_md(struct spdk_blob_persist_ctx *ctx)
 	void *tmp;
 	int rc;
 
+	seq->priority_class = blob->priority_class;
+
 	/* Generate the new metadata */
 	rc = blob_serialize(blob, &ctx->pages, &blob->active.num_pages);
 	if (rc < 0) {
@@ -2414,6 +2430,8 @@ blob_persist_write_extent_pages(spdk_bs_sequence_t *seq, void *cb_arg, int bserr
 	uint32_t                        page_count = 0;
 	int				rc;
 
+	seq->priority_class = blob->priority_class;
+
 	if (ctx->extent_page != NULL) {
 		spdk_free(ctx->extent_page);
 		ctx->extent_page = NULL;
@@ -2459,6 +2477,8 @@ blob_persist_start(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob_persist_ctx *ctx = cb_arg;
 	struct spdk_blob *blob = ctx->blob;
+
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno != 0) {
 		blob_persist_complete(seq, ctx, bserrno);
@@ -2583,6 +2603,7 @@ blob_persist(spdk_bs_sequence_t *seq, struct spdk_blob *blob,
 	     spdk_bs_sequence_cpl cb_fn, void *cb_arg)
 {
 	struct spdk_blob_persist_ctx *ctx;
+	seq->priority_class = blob->priority_class;
 
 	blob_verify_md_op(blob);
 
@@ -2661,6 +2682,7 @@ blob_free_cluster_cpl(void *cb_arg, int bserrno)
 {
 	struct spdk_blob_free_cluster_ctx *ctx = cb_arg;
 	spdk_bs_sequence_t *seq = ctx->seq;
+	seq->priority_class = ctx->blob->priority_class;
 
 	bs_sequence_finish(seq, bserrno);
 
@@ -2715,6 +2737,7 @@ blob_insert_cluster_clear(struct spdk_blob_copy_cluster_ctx *ctx)
 		blob_insert_cluster_clear_cpl(ctx, -ENOMEM);
 		return;
 	}
+	batch->priority_class = ctx->blob->priority_class;
 
 	bs_batch_clear_dev(ctx->blob, batch, bs_cluster_to_lba(ctx->blob->bs, ctx->new_cluster),
 			   bs_cluster_to_lba(ctx->blob->bs, 1));
@@ -2746,6 +2769,8 @@ blob_write_copy_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob_copy_cluster_ctx *ctx = cb_arg;
 	uint32_t cluster_number;
+	
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno) {
 		/* The write failed, so jump to the final completion handler */
@@ -2763,6 +2788,7 @@ static void
 blob_write_copy(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob_copy_cluster_ctx *ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		/* The read failed, so jump to the final completion handler */
@@ -3078,6 +3104,7 @@ blob_request_submit_op_split(struct spdk_io_channel *ch, struct spdk_blob *blob,
 		cb_fn(cb_arg, -ENOMEM);
 		return;
 	}
+	seq->priority_class = blob->priority_class;
 
 	ctx->blob = blob;
 	ctx->channel = ch;
@@ -3149,9 +3176,9 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 			return;
 		}
 
+		batch->priority_class = blob->priority_class;
 		if (is_allocated) {
 			/* Read from the blob */
-			batch->priority_class = blob->priority_class;
 			bs_batch_read_dev(batch, payload, lba, lba_count);
 		} else {
 			/* Read from the backing block device */
@@ -3475,9 +3502,9 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 			}
 
 			seq->ext_io_opts = ext_io_opts;
+			seq->priority_class = blob->priority_class;
 
 			if (is_allocated) {
-				seq->priority_class = blob->priority_class;
 				bs_sequence_readv_dev(seq, iov, iovcnt, lba, lba_count, rw_iov_done, NULL);
 			} else {
 				bs_sequence_readv_bs_dev(seq, blob->back_bs_dev, iov, iovcnt, lba, lba_count,
@@ -4007,6 +4034,8 @@ bs_write_used_clusters(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl 
 {
 	struct spdk_bs_load_ctx	*ctx = arg;
 	uint64_t	mask_size, lba, lba_count;
+	
+	seq->priority_class = ctx->blob->priority_class;
 
 	/* Write out the used clusters mask */
 	mask_size = ctx->super->used_cluster_mask_len * SPDK_BS_PAGE_SIZE;
@@ -4042,6 +4071,8 @@ bs_write_used_md(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl cb_fn)
 	struct spdk_bs_load_ctx	*ctx = arg;
 	uint64_t	mask_size, lba, lba_count;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	mask_size = ctx->super->used_page_mask_len * SPDK_BS_PAGE_SIZE;
 	ctx->mask = spdk_zmalloc(mask_size, 0x1000, NULL,
 				 SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
@@ -4065,6 +4096,8 @@ bs_write_used_blobids(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl c
 {
 	struct spdk_bs_load_ctx	*ctx = arg;
 	uint64_t	mask_size, lba, lba_count;
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (ctx->super->used_blobid_mask_len == 0) {
 		/*
@@ -4301,6 +4334,8 @@ bs_load_used_blobids_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	int rc;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	/* The type must be correct */
 	assert(ctx->mask->type == SPDK_MD_MASK_TYPE_USED_BLOBIDS);
 
@@ -4334,6 +4369,8 @@ bs_load_used_clusters_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		bs_load_ctx_fail(ctx, bserrno);
 		return;
 	}
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	/* The type must be correct */
 	assert(ctx->mask->type == SPDK_MD_MASK_TYPE_USED_CLUSTERS);
@@ -4388,6 +4425,8 @@ bs_load_used_pages_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		bs_load_ctx_fail(ctx, bserrno);
 		return;
 	}
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	/* The type must be correct */
 	assert(ctx->mask->type == SPDK_MD_MASK_TYPE_USED_PAGES);
@@ -4654,6 +4693,7 @@ static void
 bs_load_write_used_clusters_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_load_ctx_fail(ctx, bserrno);
@@ -4667,6 +4707,7 @@ static void
 bs_load_write_used_blobids_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	spdk_free(ctx->mask);
 	ctx->mask = NULL;
@@ -4683,6 +4724,7 @@ static void
 bs_load_write_used_pages_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	spdk_free(ctx->mask);
 	ctx->mask = NULL;
@@ -4742,6 +4784,8 @@ bs_load_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrn
 		return;
 	}
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	for (i = 0; i < ctx->num_extent_pages; i++) {
 		/* Extent pages are only read when present within in chain md.
 		 * Integrity of md is not right if that page was not a valid extent page. */
@@ -4784,6 +4828,7 @@ bs_load_replay_extent_pages(struct spdk_bs_load_ctx *ctx)
 	}
 
 	batch = bs_sequence_to_batch(ctx->seq, bs_load_replay_extent_page_cpl, ctx);
+	batch->priority_class = ctx->blob->priority_class;
 
 	for (i = 0; i < ctx->num_extent_pages; i++) {
 		page = ctx->extent_page_num[i];
@@ -4807,6 +4852,8 @@ bs_load_replay_md_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		bs_load_ctx_fail(ctx, bserrno);
 		return;
 	}
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	page_num = ctx->cur_page;
 	page = ctx->page;
@@ -4944,6 +4991,8 @@ bs_load_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	int rc;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	rc = bs_super_validate(ctx->super, ctx->bs);
 	if (rc != 0) {
 		bs_load_ctx_fail(ctx, rc);
@@ -5074,6 +5123,8 @@ static void
 bs_dump_finish(spdk_bs_sequence_t *seq, struct spdk_bs_load_ctx *ctx, int bserrno)
 {
 	spdk_free(ctx->super);
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	/*
 	 * We need to defer calling bs_call_cpl() until after
@@ -5317,6 +5368,8 @@ bs_dump_read_md_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	if (bserrno != 0) {
 		bs_dump_finish(seq, ctx, bserrno);
 		return;
@@ -5342,6 +5395,8 @@ bs_dump_read_md_page(spdk_bs_sequence_t *seq, void *cb_arg)
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	uint64_t lba;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	assert(ctx->cur_page < ctx->super->md_len);
 	lba = bs_page_to_lba(ctx->bs, ctx->super->md_start + ctx->cur_page);
 	bs_sequence_read_dev(seq, ctx->page, lba,
@@ -5354,6 +5409,8 @@ bs_dump_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	int rc;
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	fprintf(ctx->fp, "Signature: \"%.8s\" ", ctx->super->signature);
 	if (memcmp(ctx->super->signature, SPDK_BS_SUPER_BLOCK_SIG,
@@ -5455,6 +5512,8 @@ bs_init_persist_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	ctx->bs->used_clusters = spdk_bit_pool_create_from_array(ctx->used_clusters);
 	spdk_free(ctx->super);
 	free(ctx);
@@ -5466,6 +5525,8 @@ static void
 bs_init_trim_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx *ctx = cb_arg;
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	/* Write super block */
 	bs_sequence_write_dev(seq, ctx->super, bs_page_to_lba(ctx->bs, 0),
@@ -5691,6 +5752,8 @@ bs_destroy_trim_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	struct spdk_blob_store *bs = ctx->bs;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	/*
 	 * We need to defer calling bs_call_cpl() until after
 	 * dev destruction, so tuck these away for later use.
@@ -5758,6 +5821,8 @@ bs_unload_finish(struct spdk_bs_load_ctx *ctx, int bserrno)
 
 	spdk_free(ctx->super);
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	/*
 	 * We need to defer calling bs_call_cpl() until after
 	 * dev destruction, so tuck these away for later use.
@@ -5777,6 +5842,8 @@ bs_unload_write_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	bs_unload_finish(ctx, bserrno);
 }
 
@@ -5786,6 +5853,8 @@ bs_unload_write_used_clusters_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bse
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
 
 	spdk_free(ctx->mask);
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_unload_finish(ctx, bserrno);
@@ -5804,6 +5873,8 @@ bs_unload_write_used_blobids_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 
 	spdk_free(ctx->mask);
 	ctx->mask = NULL;
+	
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_unload_finish(ctx, bserrno);
@@ -5826,6 +5897,8 @@ bs_unload_write_used_pages_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrn
 		return;
 	}
 
+	seq->priority_class = ctx->blob->priority_class;
+
 	bs_write_used_blobids(seq, ctx, bs_unload_write_used_blobids_cpl);
 }
 
@@ -5845,6 +5918,8 @@ bs_unload_read_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 		bs_unload_finish(ctx, rc);
 		return;
 	}
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	bs_write_used_md(seq, cb_arg, bs_unload_write_used_pages_cpl);
 }
@@ -6156,6 +6231,7 @@ bs_create_blob_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob *blob = cb_arg;
 	uint32_t page_idx = bs_blobid_to_page(blob->id);
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno != 0) {
 		spdk_spin_lock(&blob->bs->used_lock);
@@ -7932,6 +8008,7 @@ static void
 bs_delete_persist_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob *blob = cb_arg;
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno != 0) {
 		/*
@@ -8354,6 +8431,7 @@ static void
 bs_delete_blob_finish(void *cb_arg, struct spdk_blob *blob, int bserrno)
 {
 	spdk_bs_sequence_t *seq = cb_arg;
+	seq->priority_class = blob->priority_class;
 	struct spdk_blob_list *snapshot_entry = NULL;
 	uint32_t page_num;
 
@@ -8439,6 +8517,7 @@ static void
 bs_delete_open_cpl(void *cb_arg, struct spdk_blob *blob, int bserrno)
 {
 	spdk_bs_sequence_t *seq = cb_arg;
+	seq->priority_class = blob->priority_class;
 	struct delete_snapshot_ctx *ctx;
 	bool update_clone = false;
 
@@ -8542,6 +8621,7 @@ bs_open_blob_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 
 	existing = blob_lookup(blob->bs, blob->id);
 	if (existing) {
+		seq->priority_class = existing->priority_class;
 		blob_free(blob);
 		existing->open_ref++;
 		seq->cpl.u.blob_handle.blob = existing;
@@ -8551,6 +8631,7 @@ bs_open_blob_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 
 	blob->open_ref++;
 
+	seq->priority_class = blob->priority_class;
 	spdk_bit_array_set(blob->bs->open_blobids, blob->id);
 	RB_INSERT(spdk_blob_tree, &blob->bs->open_blobs, blob);
 
@@ -8675,6 +8756,7 @@ static void
 blob_sync_md_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob *blob = cb_arg;
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno == 0 && (blob->data_ro_flags & SPDK_BLOB_READ_ONLY)) {
 		blob->data_ro = true;
@@ -9032,6 +9114,7 @@ static void
 blob_close_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_blob *blob = cb_arg;
+	seq->priority_class = blob->priority_class;
 
 	if (bserrno == 0) {
 		blob->open_ref--;
@@ -9657,6 +9740,7 @@ static void
 bs_load_grow_super_write_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_load_ctx_fail(ctx, bserrno);
@@ -9669,6 +9753,7 @@ static void
 bs_load_grow_used_clusters_write_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx	*ctx = cb_arg;
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_load_ctx_fail(ctx, bserrno);
@@ -9689,6 +9774,8 @@ bs_load_grow_used_clusters_read_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int b
 	uint64_t		lba, lba_count;
 	uint64_t		dev_size;
 	uint64_t		total_clusters;
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	if (bserrno != 0) {
 		bs_load_ctx_fail(ctx, bserrno);
@@ -9753,6 +9840,8 @@ bs_grow_load_super_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_load_ctx *ctx = cb_arg;
 	int rc;
+
+	seq->priority_class = ctx->blob->priority_class;
 
 	rc = bs_super_validate(ctx->super, ctx->bs);
 	if (rc != 0) {

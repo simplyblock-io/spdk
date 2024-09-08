@@ -359,7 +359,7 @@ bs_batch_open(struct spdk_io_channel *_channel, struct spdk_bs_cpl *cpl, struct 
 	set->u.batch.outstanding_ops = 0;
 	set->u.batch.batch_closed = 0;
 
-	set->priority_class = 0;
+	set->priority_class = blob->priority_class;
 	set->cb_args.cb_fn = bs_batch_completion;
 	set->cb_args.cb_arg = set;
 	set->cb_args.channel = channel->dev_channel;

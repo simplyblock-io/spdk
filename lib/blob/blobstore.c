@@ -303,7 +303,6 @@ blob_alloc(struct spdk_blob_store *bs, spdk_blob_id id)
 	if (!blob) {
 		return NULL;
 	}
-	blob->priority_class = 0;
 
 	blob->id = id;
 	blob->bs = bs;
@@ -10301,6 +10300,8 @@ void
 spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
 {
 	blob->priority_class = priority_class;
+	int old_bs_priority_class = blob->bs->priority_class;
+	blob->bs->priority_class = spdk_max(old_bs_priority_class, blob->priority_class);
 }
 
 SPDK_LOG_REGISTER_COMPONENT(blob)

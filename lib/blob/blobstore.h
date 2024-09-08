@@ -164,6 +164,8 @@ struct spdk_blob_store {
 
 	struct spdk_thread		*md_thread;
 
+	int priority_class; // max priority_class of all constituent blobs to speed up metadata I/Os
+
 	struct spdk_bs_dev		*dev;
 
 	struct spdk_bit_array		*used_md_pages;		/* Protected by used_lock */

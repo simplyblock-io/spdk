@@ -3151,7 +3151,6 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 
 		if (is_allocated) {
 			/* Read from the blob */
-			batch->priority_class = blob->priority_class;
 			bs_batch_read_dev(batch, payload, lba, lba_count);
 		} else {
 			/* Read from the backing block device */
@@ -3178,7 +3177,6 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 				return;
 			}
 
-			batch->priority_class = blob->priority_class;
 			if (op_type == SPDK_BLOB_WRITE) {
 				bs_batch_write_dev(batch, payload, lba, lba_count);
 			} else {
@@ -3259,7 +3257,6 @@ blob_request_submit_op_single(struct spdk_io_channel *_ch, struct spdk_blob *blo
 		}
 
 		if (is_allocated) {
-			batch->priority_class = blob->priority_class;
 			bs_batch_unmap_dev(batch, lba, lba_count);
 		}
 
@@ -3477,7 +3474,6 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 			seq->ext_io_opts = ext_io_opts;
 
 			if (is_allocated) {
-				seq->priority_class = blob->priority_class;
 				bs_sequence_readv_dev(seq, iov, iovcnt, lba, lba_count, rw_iov_done, NULL);
 			} else {
 				bs_sequence_readv_bs_dev(seq, blob->back_bs_dev, iov, iovcnt, lba, lba_count,
@@ -3495,7 +3491,6 @@ blob_request_submit_rw_iov(struct spdk_blob *blob, struct spdk_io_channel *_chan
 
 				seq->ext_io_opts = ext_io_opts;
 
-				seq->priority_class = blob->priority_class;
 				bs_sequence_writev_dev(seq, iov, iovcnt, lba, lba_count, rw_iov_done, NULL);
 			} else {
 				/* Queue this operation and allocate the cluster */

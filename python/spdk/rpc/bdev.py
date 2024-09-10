@@ -511,7 +511,7 @@ def bdev_aio_create(client, filename, name, block_size=None, readonly=False, fal
 
     if fallocate:
         params['fallocate'] = fallocate
-
+    
     return client.call('bdev_aio_create', params)
 
 
@@ -1431,7 +1431,7 @@ def bdev_iscsi_delete(client, name):
     return client.call('bdev_iscsi_delete', params)
 
 
-def bdev_passthru_create(client, base_bdev_name, name, uuid=None):
+def bdev_passthru_create(client, base_bdev_name, name, uuid=None, block_sz=0, md_sz = 0, reset = 1):
     """Construct a pass-through block device.
 
     Args:
@@ -1448,6 +1448,11 @@ def bdev_passthru_create(client, base_bdev_name, name, uuid=None):
     }
     if uuid:
         params['uuid'] = uuid
+    if block_sz:
+        params['block_sz'] = block_sz
+    if md_sz:
+        params['md_sz'] = md_sz
+    params['mode'] = reset 
     return client.call('bdev_passthru_create', params)
 
 

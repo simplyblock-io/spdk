@@ -495,6 +495,7 @@ Example response:
     "bdev_lvol_clone",
     "bdev_lvol_snapshot",
     "bdev_lvol_create",
+    "bdev_lvol_set_priority_class",
     "bdev_lvol_delete_lvstore",
     "bdev_lvol_rename_lvstore",
     "bdev_lvol_create_lvstore",
@@ -10245,6 +10246,48 @@ Example response:
   "jsonrpc": "2.0",
   "id": 1,
   "result": "1b38702c-7f0c-411e-a962-92c6a5a8a602"
+}
+~~~
+
+### bdev_lvol_set_priority_class {#rpc_bdev_lvol_set_priority_class}
+
+Set or change the integer priority class in the range [0, 15] of an lvol. 
+The default priority is 0 in bdev_lvol_create, but the priority must be passed in this rpc if this rpc is called.
+
+#### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+lvol_name               | Required | string      | UUID or alias of the logical volume to create a snapshot from
+lvol_priority_class     | Required | int         | Value of the priority class for the lvol
+
+#### Response
+
+Returns whether setting the priority succeeded.
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "bdev_lvol_set_priority_class",
+  "id": 1,
+  "params": {
+    "lvol_name": "1b38702c-7f0c-411e-a962-92c6a5a8a602",
+    "lvol_priority_class": "15"
+  }
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": true
 }
 ~~~
 

@@ -1703,6 +1703,14 @@ void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
+	const int min_priority_class = 0;
+	const int max_priority_class = (1 << NBITS_PRIORITY_CLASS) - 1;
+	if (!(req.lvol_priority_class >= min_priority_class && req.lvol_priority_class <= max_priority_class)) {
+		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", min_priority_class, max_priority_class);
+		spdk_jsonrpc_send_error_response(request, -EINVAL, spdk_strerror(EINVAL));
+		goto cleanup;
+	}
+
 	lvol_bdev = spdk_bdev_get_by_name(req.lvol_name);
 	if (lvol_bdev == NULL) {
 		SPDK_ERRLOG("lvol bdev '%s' does not exist\n", req.lvol_name);

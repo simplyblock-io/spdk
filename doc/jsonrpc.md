@@ -10212,6 +10212,7 @@ thin_provision          | Optional | boolean     | True to enable thin provision
 uuid                    | Optional | string      | UUID of logical volume store to create logical volume on
 lvs_name                | Optional | string      | Name of logical volume store to create logical volume on
 clear_method            | Optional | string      | Change default data clusters clear method. Available: none, unmap, write_zeroes
+priority_class          | Optional | int         | Value of the I/O priority class for the lvol. Default 0
 
 Size will be rounded up to a multiple of cluster size. Either uuid or lvs_name must be specified, but not both.
 lvol_name will be used in the alias of the created logical volume.
@@ -10234,7 +10235,8 @@ Example request:
     "size_in_mib": 1,
     "lvs_name": "LVS0",
     "clear_method": "unmap",
-    "thin_provision": true
+    "thin_provision": true,
+    "lvol_priority_class": 2
   }
 }
 ~~~
@@ -10259,7 +10261,7 @@ The default priority is 0 in bdev_lvol_create, but the priority must be passed i
 Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 lvol_name               | Required | string      | UUID or alias of the logical volume to create a snapshot from
-lvol_priority_class     | Required | int         | Value of the priority class for the lvol
+lvol_priority_class     | Required | int         | Value of the I/O priority class for the lvol
 
 #### Response
 

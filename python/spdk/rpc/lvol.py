@@ -68,7 +68,7 @@ def bdev_lvol_create(client, lvol_name, size_in_mib, thin_provision=False, uuid=
         thin_provision: True to enable thin provisioning
         uuid: UUID of logical volume store to create logical volume on (optional)
         lvs_name: name of logical volume store to create logical volume on (optional)
-        priority_class: integer lvol priority class for priority I/O within the range [0, 15] (optional)
+        lvol_priority_class: integer lvol priority class for priority I/O within the range [0, 15] (optional)
 
     Either uuid or lvs_name must be specified, but not both.
 
@@ -95,7 +95,7 @@ def bdev_lvol_set_priority_class(client, lvol_name, lvol_priority_class):
 
     Args:
         lvol_name: name of logical volume to create
-        priority_class: integer lvol priority class for priority I/O within the range [0, 15]
+        lvol_priority_class: integer lvol priority class for priority I/O within the range [0, 15]
 
     Either uuid or lvs_name must be specified, but not both.
 

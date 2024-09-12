@@ -102,11 +102,6 @@ def bdev_lvol_set_priority_class(client, lvol_name, lvol_priority_class):
     Args:
         lvol_name: name of logical volume to create
         lvol_priority_class: integer lvol priority class for priority I/O within the range [0, 15]
-
-    Either uuid or lvs_name must be specified, but not both.
-
-    Returns:
-        Name of created logical volume block device.
     """
     nbits_priority_class = 4
     min_priority_class = 0

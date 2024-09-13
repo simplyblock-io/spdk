@@ -369,6 +369,14 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		clear_method = LVOL_CLEAR_WITH_DEFAULT;
 	}
 
+	const int min_priority_class = 0;
+	const int max_priority_class = (1 << NBITS_PRIORITY_CLASS) - 1;
+	if (!(req.lvol_priority_class >= min_priority_class && req.lvol_priority_class <= max_priority_class)) {
+		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", min_priority_class, max_priority_class);
+		spdk_jsonrpc_send_error_response(request, -EINVAL, spdk_strerror(EINVAL));
+		goto cleanup;
+	}
+
 	rc = vbdev_lvol_create_with_priority_class(lvs, req.lvol_name, req.size_in_mib * 1024 * 1024,
 			       req.thin_provision, clear_method, req.lvol_priority_class, rpc_bdev_lvol_create_cb, request);
 	if (rc < 0) {

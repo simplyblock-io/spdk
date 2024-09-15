@@ -332,7 +332,6 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		     const struct spdk_json_val *params)
 {
 	struct rpc_bdev_lvol_create req = {};
-	req.lvol_priority_class = 0;
 	enum lvol_clear_method clear_method;
 	int rc = 0;
 	struct spdk_lvol_store *lvs = NULL;

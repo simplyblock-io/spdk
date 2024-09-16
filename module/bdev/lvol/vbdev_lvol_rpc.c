@@ -10,6 +10,7 @@
 #include "vbdev_lvol.h"
 #include "spdk/string.h"
 #include "spdk/log.h"
+#include "spdk/json.h"
 
 SPDK_LOG_REGISTER_COMPONENT(lvol_rpc)
 
@@ -1185,7 +1186,7 @@ rpc_dump_lvol(struct spdk_json_write_ctx *w, struct spdk_lvol *lvol)
 	spdk_json_write_named_bool(w, "is_clone", spdk_blob_is_clone(lvol->blob));
 	spdk_json_write_named_bool(w, "is_esnap_clone", spdk_blob_is_esnap_clone(lvol->blob));
 	spdk_json_write_named_bool(w, "is_degraded", spdk_blob_is_degraded(lvol->blob));
-	spdk_json_write_named_uint(w, "lvol_priority_class", lvol->priority_class);
+	spdk_json_write_named_uint8(w, "lvol_priority_class", lvol->priority_class);
 
 	spdk_json_write_named_object_begin(w, "lvs");
 	spdk_json_write_named_string(w, "name", lvs->name);

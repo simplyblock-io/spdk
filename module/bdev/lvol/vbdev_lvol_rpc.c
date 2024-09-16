@@ -376,7 +376,7 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	rc = vbdev_lvol_create_with_priority_class(lvs, req.lvol_name, req.size_in_mib * 1024 * 1024,
+	rc = vbdev_lvol_create(lvs, req.lvol_name, req.size_in_mib * 1024 * 1024,
 			       req.thin_provision, clear_method, req.lvol_priority_class, rpc_bdev_lvol_create_cb, request);
 	if (rc < 0) {
 		spdk_jsonrpc_send_error_response(request, rc, spdk_strerror(-rc));

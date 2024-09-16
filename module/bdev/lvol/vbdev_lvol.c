@@ -1204,32 +1204,9 @@ end:
 
 int
 vbdev_lvol_create(struct spdk_lvol_store *lvs, const char *name, uint64_t sz,
-		  bool thin_provision, enum lvol_clear_method clear_method, spdk_lvol_op_with_handle_complete cb_fn,
+		  bool thin_provision, enum lvol_clear_method clear_method, int8_t lvol_priority_class,
+		  spdk_lvol_op_with_handle_complete cb_fn,
 		  void *cb_arg)
-{
-	struct spdk_lvol_with_handle_req *req;
-	int rc;
-
-	req = calloc(1, sizeof(*req));
-	if (req == NULL) {
-		return -ENOMEM;
-	}
-	req->cb_fn = cb_fn;
-	req->cb_arg = cb_arg;
-
-	rc = spdk_lvol_create(lvs, name, sz, thin_provision, clear_method,
-			      _vbdev_lvol_create_cb, req);
-	if (rc != 0) {
-		free(req);
-	}
-
-	return rc;
-}
-
-int
-vbdev_lvol_create_with_priority_class(struct spdk_lvol_store *lvs, const char *name, uint64_t sz,
-		  bool thin_provision, enum lvol_clear_method clear_method, int lvol_priority_class, 
-		  spdk_lvol_op_with_handle_complete cb_fn, void *cb_arg)
 {
 	struct spdk_lvol_with_handle_req *req;
 	int rc;

@@ -369,10 +369,8 @@ rpc_bdev_lvol_create(struct spdk_jsonrpc_request *request,
 		clear_method = LVOL_CLEAR_WITH_DEFAULT;
 	}
 
-	const int min_priority_class = 0;
-	const int max_priority_class = (1 << NBITS_PRIORITY_CLASS) - 1;
-	if (!(req.lvol_priority_class >= min_priority_class && req.lvol_priority_class <= max_priority_class)) {
-		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", min_priority_class, max_priority_class);
+	if (!(req.lvol_priority_class >= MIN_PRIORITY_CLASS && req.lvol_priority_class <= MAX_PRIORITY_CLASS)) {
+		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", MIN_PRIORITY_CLASS, MAX_PRIORITY_CLASS);
 		spdk_jsonrpc_send_error_response(request, -EINVAL, spdk_strerror(EINVAL));
 		goto cleanup;
 	}
@@ -1712,10 +1710,8 @@ void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 		goto cleanup;
 	}
 
-	const int min_priority_class = 0;
-	const int max_priority_class = (1 << NBITS_PRIORITY_CLASS) - 1;
-	if (!(req.lvol_priority_class >= min_priority_class && req.lvol_priority_class <= max_priority_class)) {
-		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", min_priority_class, max_priority_class);
+	if (!(req.lvol_priority_class >= MIN_PRIORITY_CLASS && req.lvol_priority_class <= MAX_PRIORITY_CLASS)) {
+		SPDK_ERRLOG("lvol priority class is not within the allowed range of [%d, %d]", MIN_PRIORITY_CLASS, MAX_PRIORITY_CLASS);
 		spdk_jsonrpc_send_error_response(request, -EINVAL, spdk_strerror(EINVAL));
 		goto cleanup;
 	}

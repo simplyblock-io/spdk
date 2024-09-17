@@ -3915,6 +3915,8 @@ bs_alloc(struct spdk_bs_dev *dev, struct spdk_bs_opts *opts, struct spdk_blob_st
 	bs->md_thread = spdk_get_thread();
 	assert(bs->md_thread != NULL);
 
+	bs->priority_class = MAX_PRIORITY_CLASS; // max priority for metadata I/O
+
 	/*
 	 * Do not use bs_lba_to_cluster() here since blockcnt may not be an
 	 *  even multiple of the cluster size.
@@ -10300,8 +10302,6 @@ void
 spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
 {
 	blob->priority_class = priority_class;
-	int old_bs_priority_class = blob->bs->priority_class;
-	blob->bs->priority_class = spdk_max(old_bs_priority_class, blob->priority_class);
 }
 
 SPDK_LOG_REGISTER_COMPONENT(blob)

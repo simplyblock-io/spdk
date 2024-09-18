@@ -480,7 +480,6 @@ if __name__ == "__main__":
                                             block_size=args.block_size,
                                             readonly=args.readonly,
                                             fallocate=args.fallocate))
-        
 
     p = subparsers.add_parser('bdev_aio_create', help='Add a bdev with aio backend')
     p.add_argument('filename', help='Path to device or file (ex: /dev/sda)')
@@ -1192,18 +1191,12 @@ if __name__ == "__main__":
         print_json(rpc.bdev.bdev_passthru_create(args.client,
                                                  base_bdev_name=args.base_bdev_name,
                                                  name=args.name,
-                                                 uuid=args.uuid,
-                                                 block_sz=args.block_sz,                                                 
-                                                 md_sz=args.md_sz,
-                                                 reset=args.reset))
+                                                 uuid=args.uuid))
 
     p = subparsers.add_parser('bdev_passthru_create', help='Add a pass through bdev on existing bdev')
     p.add_argument('-b', '--base-bdev-name', help="Name of the existing bdev", required=True)
     p.add_argument('-p', '--name', help="Name of the pass through bdev", required=True)
     p.add_argument('-u', '--uuid', help="UUID of the bdev")
-    p.add_argument('-s', '--block_sz', type=int, help="Block size of the passthru bdev")
-    p.add_argument('-m', '--md-sz', type=int, help='Metadata size for this bdev (0, 8, 16, 32, 64, or 128). Default is 0.')
-    p.add_argument('-r', '--reset', type=int, help='reset Metadata region for this bdev (0 or 1). Default is 1.')
     p.set_defaults(func=bdev_passthru_create)
 
     def bdev_passthru_delete(args):
@@ -2066,7 +2059,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('lvol_name', help='lvol bdev name (uuid returned by bdev_lvol_create)')
     p.add_argument('lvol_priority_class', help='integer I/O priority class for this lvol in the range [0, 15]', type=int)
     p.set_default(func=bdev_lvol_set_priority_class)
-
+    
     def bdev_lvol_snapshot(args):
         print_json(rpc.lvol.bdev_lvol_snapshot(args.client,
                                                lvol_name=args.lvol_name,

@@ -359,10 +359,9 @@ _raid_bdev_write_superblock(void *_ctx)
 
 		const uint64_t offset_blocks = 0;
 		const uint64_t num_blocks = raid_bdev->sb_io_buf_size / bdev->blocklen;
-		const uint64_t priority_blocks = ((uint64_t)raid_bdev->priority_class << PRIORITY_CLASS_BITS_POS) | offset_blocks;
 
 		rc = spdk_bdev_write_blocks(base_info->desc, base_info->app_thread_ch,
-				     raid_bdev->sb_io_buf, priority_blocks, num_blocks,
+				     raid_bdev->sb_io_buf, offset_blocks, num_blocks,
 				     raid_bdev_write_superblock_cb, ctx);
 		if (rc != 0) {
 			if (rc == -ENOMEM) {

@@ -1539,8 +1539,6 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		base_info->raid_bdev = raid_bdev;
 	}
 
-	raid_bdev->priority_class = 0;
-
 	/* strip_size_kb is from the rpc param.  strip_size is in blocks and used
 	 * internally and set later.
 	 */

@@ -953,7 +953,6 @@ static void
 vbdev_lvol_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_io)
 {
 	struct spdk_lvol *lvol = bdev_io->bdev->ctxt;
-	bdev_io->u.bdev.offset_blocks &= MASK_OUT_PRIORITY_CLASS;
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:

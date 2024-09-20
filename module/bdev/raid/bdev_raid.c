@@ -922,6 +922,7 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 			  bdev_io->u.bdev.iovs, bdev_io->u.bdev.iovcnt, bdev_io->u.bdev.md_buf,
 			  bdev_io->u.bdev.memory_domain, bdev_io->u.bdev.memory_domain_ctx);
 	raid_io->priority_class = (bdev_io->u.bdev.offset_blocks & PRIORITY_CLASS_MASK) >> PRIORITY_CLASS_BITS_POS;
+	if (raid_io->priority_class) { raid_io->raid_bdev->supports_priority_class = 1; }
 
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
@@ -1538,6 +1539,8 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	RAID_FOR_EACH_BASE_BDEV(raid_bdev, base_info) {
 		base_info->raid_bdev = raid_bdev;
 	}
+
+	raid_bdev->supports_priority_class = 0;
 
 	/* strip_size_kb is from the rpc param.  strip_size is in blocks and used
 	 * internally and set later.

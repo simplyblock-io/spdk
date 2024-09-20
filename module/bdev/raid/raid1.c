@@ -489,7 +489,7 @@ raid1_submit_process_request(struct raid_bdev_process_request *process_req,
 			  process_req->offset_blocks, process_req->num_blocks,
 			  &process_req->iov, 1, process_req->md_buf, NULL, NULL);
 	raid_io->completion_cb = raid1_process_read_completed;
-	raid_io->priority_class = MAX_PRIORITY_CLASS;
+	raid_io->priority_class = raid_io->raid_bdev->supports_priority_class ? MAX_PRIORITY_CLASS : 0;
 
 	ret = raid1_submit_read_request(raid_io);
 	if (spdk_likely(ret == 0)) {

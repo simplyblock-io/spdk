@@ -195,6 +195,8 @@ struct raid_bdev {
 	/* array of base bdev info */
 	struct raid_base_bdev_info	*base_bdev_info;
 
+	uint8_t supports_priority_class; // whether lvol priority is supported, default 0 (false)
+
 	/* strip size of raid bdev in blocks */
 	uint32_t			strip_size;
 

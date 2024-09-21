@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, Linux, ARM64, linux-arm]
+    runs-on: [self-hosted, Linux, ARM64]
 
     steps:
     - name: Checkout the triggered branch

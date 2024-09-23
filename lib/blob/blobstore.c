@@ -10299,7 +10299,7 @@ spdk_blob_is_degraded(const struct spdk_blob *blob)
 }
 
 void
-spdk_blob_set_priority_class(struct spdk_blob* blob, int priority_class)
+spdk_blob_set_io_priority_class(struct spdk_blob* blob, int priority_class)
 {
 	blob->priority_class = priority_class;
 	if (priority_class) { blob->bs->priority_class = MAX_PRIORITY_CLASS; } // max priority for metadata I/O if priority is supported

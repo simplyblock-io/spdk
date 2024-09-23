@@ -1264,7 +1264,7 @@ bool spdk_blob_is_degraded(const struct spdk_blob *blob);
 lvol's priority class bits. These bits must be cleared when the I/O reaches the lvolstore and added 
 again when it exits the lvolstore so that no internal lvolstore operation sees these bits.
 */
-void spdk_blob_set_priority_class(struct spdk_blob *blob, int priority_class);
+void spdk_blob_set_io_priority_class(struct spdk_blob *blob, int priority_class);
 
 #ifdef __cplusplus
 }

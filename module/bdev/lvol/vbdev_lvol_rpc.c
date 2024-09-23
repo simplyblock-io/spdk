@@ -1692,7 +1692,8 @@ invalid:
 					 spdk_strerror(-lvolerrno));
 }
 
-void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
+static void 
+rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 			      const struct spdk_json_val *params) 
 {
 	struct rpc_bdev_lvol_set_priority_class req = {};
@@ -1731,7 +1732,7 @@ void rpc_bdev_lvol_set_priority_class(struct spdk_jsonrpc_request *request,
 	}
 
 	lvol->priority_class = req.lvol_priority_class;
-	vbdev_lvol_set_priority_class_blocks(lvol);
+	vbdev_lvol_set_io_priority_class(lvol);
 	rpc_bdev_lvol_set_priority_class_cb(request, 0);
 
 cleanup:

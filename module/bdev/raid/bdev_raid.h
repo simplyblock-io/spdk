@@ -408,10 +408,10 @@ raid_bdev_readv_blocks_ext(struct raid_base_bdev_info *base_info, struct spdk_io
 			   uint64_t num_blocks, spdk_bdev_io_completion_cb cb, void *cb_arg,
 			   struct spdk_bdev_ext_io_opts *opts, int8_t priority_class)
 {
-	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+	const uint64_t priority_lba = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
 
 	return spdk_bdev_readv_blocks_ext(base_info->desc, ch, iov, iovcnt,
-					  priority_blocks, num_blocks, cb, cb_arg, opts);
+					  priority_lba, num_blocks, cb, cb_arg, opts);
 }
 
 /**
@@ -435,10 +435,10 @@ raid_bdev_writev_blocks_ext(struct raid_base_bdev_info *base_info, struct spdk_i
 		}
 	}
 
-	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | remapped_offset_blocks;
+	const uint64_t priority_lba = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | remapped_offset_blocks;
 
 	return spdk_bdev_writev_blocks_ext(base_info->desc, ch, iov, iovcnt,
-					   priority_blocks, num_blocks, cb, cb_arg, opts);
+					   priority_lba, num_blocks, cb, cb_arg, opts);
 }
 
 /**
@@ -450,9 +450,9 @@ raid_bdev_unmap_blocks(struct raid_base_bdev_info *base_info, struct spdk_io_cha
 		       spdk_bdev_io_completion_cb cb, void *cb_arg)
 {
 	const int priority_class = ((struct raid_bdev_io*)cb_arg)->priority_class;
-	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+	const uint64_t priority_lba = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
 
-	return spdk_bdev_unmap_blocks(base_info->desc, ch, priority_blocks,
+	return spdk_bdev_unmap_blocks(base_info->desc, ch, priority_lba,
 				      num_blocks, cb, cb_arg);
 }
 
@@ -465,9 +465,9 @@ raid_bdev_flush_blocks(struct raid_base_bdev_info *base_info, struct spdk_io_cha
 		       spdk_bdev_io_completion_cb cb, void *cb_arg)
 {
 	const int priority_class = ((struct raid_bdev_io*)cb_arg)->priority_class;
-	const uint64_t priority_blocks = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
+	const uint64_t priority_lba = ((uint64_t)priority_class << PRIORITY_CLASS_BITS_POS) | (base_info->data_offset + offset_blocks);
 
-	return spdk_bdev_flush_blocks(base_info->desc, ch, priority_blocks,
+	return spdk_bdev_flush_blocks(base_info->desc, ch, priority_lba,
 				      num_blocks, cb, cb_arg);
 }
 

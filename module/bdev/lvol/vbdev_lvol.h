@@ -149,6 +149,6 @@ void vbdev_lvol_set_external_parent(struct spdk_lvol *lvol, const char *esnap_na
 the lvol's priority class bits. These bits must be cleared when the I/O reaches the lvolstore and added
 again when it exits the lvolstore so that no internal lvolstore operation sees these bits.
 */
-void vbdev_lvol_set_priority_class_blocks(struct spdk_lvol* lvol);
+void vbdev_lvol_set_io_priority_class(struct spdk_lvol* lvol);
 
 #endif /* SPDK_VBDEV_LVOL_H */

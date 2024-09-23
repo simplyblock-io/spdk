@@ -2058,7 +2058,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p = subparsers.add_parser('bdev_lvol_set_priority_class', help='Set or change the priority class of an lvol')
     p.add_argument('lvol_name', help='lvol bdev name (uuid returned by bdev_lvol_create)')
     p.add_argument('lvol_priority_class', help='integer I/O priority class for this lvol in the range [0, 15]', type=int)
-    p.set_default(func=bdev_lvol_set_priority_class)
+    p.set_defaults(func=bdev_lvol_set_priority_class)
     
     def bdev_lvol_snapshot(args):
         print_json(rpc.lvol.bdev_lvol_snapshot(args.client,

@@ -1194,7 +1194,7 @@ _vbdev_lvol_create_cb(void *cb_arg, struct spdk_lvol *lvol, int lvolerrno)
 	}
 
 	lvol->priority_class = req->lvol_priority_class;
-	vbdev_lvol_set_priority_class_blocks(lvol);
+	vbdev_lvol_set_io_priority_class(lvol);
 
 	lvolerrno = _create_lvol_disk(lvol, true);
 end:
@@ -2067,8 +2067,8 @@ vbdev_lvol_set_external_parent(struct spdk_lvol *lvol, const char *esnap_name,
 	spdk_bdev_close(desc);
 }
 
-void vbdev_lvol_set_priority_class_blocks(struct spdk_lvol *lvol) {
-	spdk_blob_set_priority_class(lvol->blob, lvol->priority_class);
+void vbdev_lvol_set_io_priority_class(struct spdk_lvol *lvol) {
+	spdk_blob_set_io_priority_class(lvol->blob, lvol->priority_class);
 }
 
 SPDK_LOG_REGISTER_COMPONENT(vbdev_lvol)

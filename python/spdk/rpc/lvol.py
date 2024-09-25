@@ -81,7 +81,7 @@ def bdev_lvol_create(client, lvol_name, size_in_mib, thin_provision=False, uuid=
     nbits_priority_class = 4
     min_priority_class = 0
     max_priority_class = 2**(nbits_priority_class) - 1
-    if not (lvol_priority_class >= min_priority_class and priority_class <= max_priority_class):
+    if not (lvol_priority_class >= min_priority_class and lvol_priority_class <= max_priority_class):
         raise ValueError("lvol_priority_class must be in the range [{}, {}]".format(min_priority_class, max_priority_class))
 
     params = {'lvol_name': lvol_name, 'size_in_mib': size_in_mib}

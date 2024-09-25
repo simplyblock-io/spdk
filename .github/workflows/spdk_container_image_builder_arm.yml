@@ -6,8 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, Linux, ARM64]
-
+    runs-on: linux-arm
     steps:
     - name: Checkout the triggered branch
       uses: actions/checkout@v3
@@ -27,7 +26,7 @@ jobs:
         echo "SHA=$([ -z '${{ github.event.pull_request.head.sha }}' ] && echo $GITHUB_SHA || echo '${{ github.event.pull_request.head.sha }}')" >> $GITHUB_ENV
 
     - name: Build the docker image
-      run: sudo docker build --file docker/Dockerfile_spdk_arm --tag simplyblock/spdk-core:$TAG-arm64 .
+      run: docker build --file docker/Dockerfile_spdk_arm --tag simplyblock/spdk-core:$TAG-arm64 .
 
     - name: Login to Docker Hub
       uses: docker/login-action@v1
@@ -36,21 +35,21 @@ jobs:
         password: ${{ secrets.DOCKER_PASS }}
 
     - name: Push Images
-      run: sudo docker push simplyblock/spdk-core:$TAG-arm64
+      run: docker push simplyblock/spdk-core:$TAG-arm64
 
-    # - name: Configure AWS Credentials
-    #   uses: aws-actions/configure-aws-credentials@v1
-    #   with:
-    #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_HAMDI }}
-    #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_HAMDI }}
-    #     aws-region: us-east-1
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_HAMDI }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_HAMDI }}
+        aws-region: us-east-1
 
-    # - name: Login to ECR
-    #   id: login-ecr
-    #   uses: aws-actions/amazon-ecr-login@v2
+    - name: Login to ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-    # - name: Tag docker image
-    #   run: docker tag simplyblock/spdk-core:$TAG-arm64 565979732541.dkr.ecr.us-east-1.amazonaws.com/spdk-core:$TAG-arm64
+    - name: Tag docker image
+      run: docker tag simplyblock/spdk-core:$TAG-arm64 565979732541.dkr.ecr.us-east-1.amazonaws.com/spdk-core:$TAG-arm64
 
-    # - name: Push the docker image
-    #   run: docker image push 565979732541.dkr.ecr.us-east-1.amazonaws.com/spdk-core:$TAG-arm64
+    - name: Push the docker image
+      run: docker image push 565979732541.dkr.ecr.us-east-1.amazonaws.com/spdk-core:$TAG-arm64

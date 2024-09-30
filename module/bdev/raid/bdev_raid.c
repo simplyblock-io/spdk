@@ -901,6 +901,24 @@ raid_bdev_io_init(struct raid_bdev_io *raid_io, struct raid_bdev_io_channel *rai
 	raid_bdev_io_set_default_status(raid_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
+static int
+bdev_io_unmap_poller(void *arg)
+{
+	struct raid_bdev *raid_bdev = arg;
+	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit) {
+		return SPDK_POLLER_IDLE;
+	}
+
+	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {
+        struct raid_bdev_io *raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+		raid_bdev->module->submit_null_payload_request(raid_io);
+        TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);  // Remove from queue
+		return SPDK_POLLER_BUSY;
+    }
+	
+	return SPDK_POLLER_IDLE;
+}
+
 /*
  * brief:
  * raid_bdev_submit_request function is the submit_request function pointer of
@@ -935,14 +953,22 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		raid_bdev_submit_reset_request(raid_io);
 		break;
 
-	case SPDK_BDEV_IO_TYPE_FLUSH:
+	case SPDK_BDEV_IO_TYPE_FLUSH:	
+		if (raid_io->raid_bdev->process != NULL) {
+			/* TODO: rebuild support */
+			raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
+			return;
+		}		
+		raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
+		break;
+
 	case SPDK_BDEV_IO_TYPE_UNMAP:
 		if (raid_io->raid_bdev->process != NULL) {
 			/* TODO: rebuild support */
 			raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
 			return;
 		}
-		raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
+		TAILQ_INSERT_TAIL(&raid_io->raid_bdev->unmap_queue, raid_io, entries);
 		break;
 
 	default:
@@ -1448,7 +1474,7 @@ raid_bdev_init(void)
 static int
 _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		  enum raid_level level, bool superblock_enabled, const struct spdk_uuid *uuid,
-		  struct raid_bdev **raid_bdev_out)
+		  struct raid_bdev **raid_bdev_out, uint32_t io_unmap_limit)
 {
 	struct raid_bdev *raid_bdev;
 	struct spdk_bdev *raid_bdev_gen;
@@ -1563,9 +1589,10 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	raid_bdev_gen->module = &g_raid_if;
 	raid_bdev_gen->write_cache = 0;
 	spdk_uuid_copy(&raid_bdev_gen->uuid, uuid);
-
+	TAILQ_INIT(&raid_bdev->unmap_queue);
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
-
+	raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
+	raid_bdev->io_unmap_limit = io_unmap_limit;
 	*raid_bdev_out = raid_bdev;
 
 	return 0;
@@ -1589,7 +1616,7 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 int
 raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		 enum raid_level level, bool superblock_enabled, const struct spdk_uuid *uuid,
-		 struct raid_bdev **raid_bdev_out)
+		 struct raid_bdev **raid_bdev_out, uint32_t io_unmap_limit)
 {
 	struct raid_bdev *raid_bdev;
 	int rc;
@@ -1597,7 +1624,7 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	assert(uuid != NULL);
 
 	rc = _raid_bdev_create(name, strip_size, num_base_bdevs, level, superblock_enabled, uuid,
-			       &raid_bdev);
+			       &raid_bdev, io_unmap_limit);
 	if (rc != 0) {
 		return rc;
 	}
@@ -1842,7 +1869,7 @@ raid_bdev_deconfigure(struct raid_bdev *raid_bdev, raid_bdev_destruct_cb cb_fn,
 
 	raid_bdev->state = RAID_BDEV_STATE_OFFLINE;
 	SPDK_DEBUGLOG(bdev_raid, "raid bdev state changing from online to offline\n");
-
+	spdk_poller_unregister(&raid_bdev->poller);
 	spdk_bdev_unregister(&raid_bdev->bdev, cb_fn, cb_arg);
 }
 
@@ -3382,7 +3409,7 @@ raid_bdev_create_from_sb(const struct raid_bdev_superblock *sb, struct raid_bdev
 	int rc;
 
 	rc = _raid_bdev_create(sb->name, (sb->strip_size * sb->block_size) / 1024, sb->num_base_bdevs,
-			       sb->level, true, &sb->uuid, &raid_bdev);
+			       sb->level, true, &sb->uuid, &raid_bdev, 0);
 	if (rc != 0) {
 		return rc;
 	}

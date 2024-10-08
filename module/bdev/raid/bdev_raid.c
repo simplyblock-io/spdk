@@ -470,7 +470,7 @@ _raid_bdev_destruct(void *ctxt)
 {
 	struct raid_bdev *raid_bdev = ctxt;
 	struct raid_base_bdev_info *base_info;
-
+	// spdk_poller_unregister(&raid_bdev->poller);
 	SPDK_DEBUGLOG(bdev_raid, "raid_bdev_destruct\n");
 
 	assert(raid_bdev->process == NULL);
@@ -1596,7 +1596,7 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	raid_bdev_gen->module = &g_raid_if;
 	raid_bdev_gen->write_cache = 0;
 	spdk_uuid_copy(&raid_bdev_gen->uuid, uuid);
-	// TAILQ_INIT(&raid_bdev->unmap_queue);
+	TAILQ_INIT(&raid_bdev->unmap_queue);
 	// spdk_spin_init(&raid_bdev->used_lock);
 	// TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
 	// raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);

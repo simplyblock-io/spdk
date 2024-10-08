@@ -909,13 +909,17 @@ bdev_io_unmap_poller(void *arg)
 		return SPDK_POLLER_IDLE;
 	}
 
-	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {
-        struct raid_bdev_io *raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
-		raid_bdev->module->submit_null_payload_request(raid_io);
-        TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);  // Remove from queue
-		return SPDK_POLLER_BUSY;
-    }
 	
+	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {
+		spdk_spin_lock(&raid_bdev->used_lock);
+        struct raid_bdev_io *raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+		spdk_spin_unlock(&raid_bdev->used_lock);
+		raid_bdev->module->submit_null_payload_request(raid_io);
+		spdk_spin_lock(&raid_bdev->used_lock);
+        TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);  // Remove from queue
+		spdk_spin_unlock(&raid_bdev->used_lock);
+		return SPDK_POLLER_BUSY;
+    }	
 	return SPDK_POLLER_IDLE;
 }
 
@@ -968,7 +972,10 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 			raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
 			return;
 		}
+		spdk_spin_lock(&raid_io->raid_bdev->used_lock);
 		TAILQ_INSERT_TAIL(&raid_io->raid_bdev->unmap_queue, raid_io, entries);
+		spdk_spin_unlock(&raid_io->raid_bdev->used_lock);
+		// raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
 		break;
 
 	default:
@@ -1590,6 +1597,7 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	raid_bdev_gen->write_cache = 0;
 	spdk_uuid_copy(&raid_bdev_gen->uuid, uuid);
 	TAILQ_INIT(&raid_bdev->unmap_queue);
+	spdk_spin_init(&raid_bdev->used_lock);
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
 	raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
 	raid_bdev->io_unmap_limit = io_unmap_limit;

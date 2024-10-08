@@ -143,7 +143,7 @@ struct raid_bdev_io {
 	/* Used for tracking progress on io requests sent to member disks. */
 	uint64_t			base_bdev_io_remaining;
 	uint8_t				base_bdev_io_submitted;
-	enum spdk_bdev_io_status	base_bdev_io_status;
+	enum spdk_bdev_io_status	base_bdev_io_status;	
 	/* This will be the raid_io completion status unless any base io's status is different. */
 	enum spdk_bdev_io_status	base_bdev_io_status_default;
 	TAILQ_ENTRY(raid_bdev_io) entries;
@@ -201,6 +201,7 @@ struct raid_bdev {
 	uint32_t			unmap_inflight;
 	uint32_t 			io_unmap_limit;
 	struct spdk_poller			*poller;
+	struct spdk_spinlock		used_lock;
 	TAILQ_HEAD(unmap_io_queue, raid_bdev_io) unmap_queue;
 
 	/* strip size of raid bdev in KB */

@@ -904,7 +904,7 @@ raid_bdev_io_init(struct raid_bdev_io *raid_io, struct raid_bdev_io_channel *rai
 static int
 bdev_io_unmap_poller(void *arg)
 {
-	struct raid_bdev_io *raid_io;
+	struct raid_bdev_io *raid_io = NULL;
 	struct raid_bdev *raid_bdev = arg;
 	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit) {
 		return SPDK_POLLER_IDLE;
@@ -1606,9 +1606,10 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	TAILQ_INIT(&raid_bdev->unmap_queue);
 	spdk_spin_init(&raid_bdev->used_lock);
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
-	raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
 	raid_bdev->io_unmap_limit = io_unmap_limit;
 	raid_bdev->unmap_inflight = 0;
+	raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
+
 	*raid_bdev_out = raid_bdev;
 
 	return 0;

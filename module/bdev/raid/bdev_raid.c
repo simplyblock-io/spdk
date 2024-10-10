@@ -590,7 +590,8 @@ raid_bdev_verify_dix_reftag(struct iovec *iovs, int iovcnt, void *md_buf,
 }
 
 
-static struct spdk_thread *get_thread_from_bdev_io(struct spdk_bdev_io *bdev_io)
+static struct spdk_thread *
+get_thread_from_bdev_io(struct spdk_bdev_io *bdev_io)
 {
     // Get the I/O channel associated with the bdev_io
     struct spdk_io_channel *io_channel = spdk_bdev_io_get_io_channel(bdev_io);
@@ -607,48 +608,67 @@ _raid0_submit_null_payload_request_(void *_raid_io)
 {
 	struct raid_bdev_io *raid_io = _raid_io;
 	raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
-	// raid0_submit_null_payload_request(raid_io);
 }
 
 
-static int
-bdev_io_unmap_poller(struct raid_bdev *raid_bdev, bool unamp_done)
+static void
+bdev_io_unmap_poller(struct raid_bdev_io *raid_io, bool unmap_done, bool increase)
 {
 	
-	struct raid_bdev_io *raid_io = NULL;
-	// struct raid_bdev *raid_bdev = (struct raid_bdev *)arg;
+	struct raid_bdev_io *t_raid_io = NULL;
+	struct raid_bdev *raid_bdev =  raid_io->raid_bdev;
+	struct spdk_thread *io_thread, *current_thread;	
+	struct spdk_bdev_io *bdev_io;
+	bool chanage_counter = increase || unmap_done;
 	assert(raid_bdev->level == RAID0);
-	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit) {
-		return SPDK_POLLER_IDLE;
+	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit && !unmap_done) {
+		if (chanage_counter) {
+			spdk_spin_lock(&raid_bdev->used_lock);
+			if (increase) {			
+				TAILQ_INSERT_TAIL(&raid_bdev->unmap_queue, raid_io, entries);			
+			} else if (unmap_done) {
+				raid_bdev->unmap_inflight--;
+			}
+			spdk_spin_unlock(&raid_bdev->used_lock);
+		}
+		return;
+	} 
+	
+	if (increase) {
+		spdk_spin_lock(&raid_bdev->used_lock);		
+		raid_bdev->unmap_inflight++;
+		spdk_spin_unlock(&raid_bdev->used_lock);
+		raid_bdev->module->submit_null_payload_request(raid_io);
+		return;
 	}
 
 	spdk_spin_lock(&raid_bdev->used_lock);
-	if (unamp_done) {
-			raid_bdev->unmap_inflight--;
+	if (unmap_done) {
+		raid_bdev->unmap_inflight--;
 	}
 
 	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {		
-        raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
-		TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);		
+        t_raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+		if (t_raid_io) {
+			raid_bdev->unmap_inflight++;
+		}
+		TAILQ_REMOVE(&raid_bdev->unmap_queue, t_raid_io, entries);
+		
 	}
 	spdk_spin_unlock(&raid_bdev->used_lock);
 
-	if (raid_io && raid_io->raid_bdev->level == RAID0) {
-		// if(same) {
-		// 	raid_bdev->module->submit_null_payload_request(raid_io);
-		// }
-		struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(raid_io);
-		struct spdk_thread *th = get_thread_from_bdev_io(bdev_io);
-		struct spdk_thread *current_thread = spdk_get_thread();
-		if(current_thread == th){
-			raid_bdev->module->submit_null_payload_request(raid_io);
+	if (t_raid_io && t_raid_io->raid_bdev->level == RAID0) {
+		bdev_io = spdk_bdev_io_from_ctx(t_raid_io);
+		io_thread = get_thread_from_bdev_io(bdev_io);
+		current_thread = spdk_get_thread();
+		if(current_thread == io_thread) {
+			raid_bdev->module->submit_null_payload_request(t_raid_io);
 		} else {
-			spdk_thread_send_msg(th, _raid0_submit_null_payload_request_, raid_io);
-		}
-		// raid_bdev->module->submit_null_payload_request(raid_io);
-		return SPDK_POLLER_BUSY;
+			spdk_thread_send_msg(io_thread, _raid0_submit_null_payload_request_, t_raid_io);
+		}	
+		return;
 	}
-	return SPDK_POLLER_IDLE;
+	return;
 }
 
 
@@ -697,6 +717,14 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 		}
 	}
 
+	if (raid_io->raid_bdev->level == RAID0) {
+		if (raid_io->type == SPDK_BDEV_IO_TYPE_UNMAP) {
+			bdev_io_unmap_poller(raid_io, true, false);
+		} else {
+			bdev_io_unmap_poller(raid_io, false, false);
+		}
+	}
+
 	if (spdk_unlikely(raid_io->completion_cb != NULL)) {
 		raid_io->completion_cb(raid_io, status);
 	} else {
@@ -713,13 +741,6 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 			}
 		}
 		spdk_bdev_io_complete(bdev_io, status);
-	}
-
-	if(raid_io->raid_bdev->level==RAID0) {
-		if(raid_io->type == SPDK_BDEV_IO_TYPE_UNMAP)
-			bdev_io_unmap_poller(raid_io->raid_bdev, true);
-		else
-			bdev_io_unmap_poller(raid_io->raid_bdev, false);
 	}
 }
 
@@ -1026,12 +1047,9 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 			raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
 			return;
 		}
+
 		if(raid_io->raid_bdev->level == RAID0) {
-			spdk_spin_lock(&raid_io->raid_bdev->used_lock);
-			TAILQ_INSERT_TAIL(&raid_io->raid_bdev->unmap_queue, raid_io, entries);
-			raid_io->raid_bdev->unmap_inflight++;
-			spdk_spin_unlock(&raid_io->raid_bdev->used_lock);
-			bdev_io_unmap_poller(raid_io->raid_bdev, false);	
+			bdev_io_unmap_poller(raid_io, false, true);	
 		} else {
 			raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
 		}

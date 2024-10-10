@@ -12,6 +12,9 @@
 #include "spdk/util.h"
 #include "spdk/json.h"
 #include "spdk/likely.h"
+#include "spdk/bdev.h"
+#include "spdk/bdev_module.h"
+
 
 #define RAID_OFFSET_BLOCKS_INVALID	UINT64_MAX
 #define RAID_BDEV_PROCESS_MAX_QD	16
@@ -345,9 +348,9 @@ raid_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	}
 	free(raid_ch->base_channel);
 	raid_ch->base_channel = NULL;
-	if (raid_bdev->level == RAID0) {
-		spdk_poller_unregister(&raid_bdev->poller);
-	}
+	// if (raid_bdev->level == RAID0) {
+	// 	spdk_poller_unregister(&raid_bdev->poller);
+	// }
 	raid_bdev_ch_process_cleanup(raid_ch);
 }
 
@@ -586,6 +589,69 @@ raid_bdev_verify_dix_reftag(struct iovec *iovs, int iovcnt, void *md_buf,
 	return rc;
 }
 
+
+static struct spdk_thread *get_thread_from_bdev_io(struct spdk_bdev_io *bdev_io)
+{
+    // Get the I/O channel associated with the bdev_io
+    struct spdk_io_channel *io_channel = spdk_bdev_io_get_io_channel(bdev_io);
+    
+    // Get the SPDK thread associated with the I/O channel
+    struct spdk_thread *thread = spdk_io_channel_get_thread(io_channel);
+    
+    return thread;
+}
+
+
+static void
+_raid0_submit_null_payload_request_(void *_raid_io)
+{
+	struct raid_bdev_io *raid_io = _raid_io;
+	raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
+	// raid0_submit_null_payload_request(raid_io);
+}
+
+
+static int
+bdev_io_unmap_poller(struct raid_bdev *raid_bdev, bool unamp_done)
+{
+	
+	struct raid_bdev_io *raid_io = NULL;
+	// struct raid_bdev *raid_bdev = (struct raid_bdev *)arg;
+	assert(raid_bdev->level == RAID0);
+	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit) {
+		return SPDK_POLLER_IDLE;
+	}
+
+	spdk_spin_lock(&raid_bdev->used_lock);
+	if (unamp_done) {
+			raid_bdev->unmap_inflight--;
+	}
+
+	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {		
+        raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+		TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);		
+	}
+	spdk_spin_unlock(&raid_bdev->used_lock);
+
+	if (raid_io && raid_io->raid_bdev->level == RAID0) {
+		// if(same) {
+		// 	raid_bdev->module->submit_null_payload_request(raid_io);
+		// }
+		struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(raid_io);
+		struct spdk_thread *th = get_thread_from_bdev_io(bdev_io);
+		struct spdk_thread *current_thread = spdk_get_thread();
+		if(current_thread == th){
+			raid_bdev->module->submit_null_payload_request(raid_io);
+		} else {
+			spdk_thread_send_msg(th, _raid0_submit_null_payload_request_, raid_io);
+		}
+		// raid_bdev->module->submit_null_payload_request(raid_io);
+		return SPDK_POLLER_BUSY;
+	}
+	return SPDK_POLLER_IDLE;
+}
+
+
 void
 raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status status)
 {
@@ -647,6 +713,13 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 			}
 		}
 		spdk_bdev_io_complete(bdev_io, status);
+	}
+
+	if(raid_io->raid_bdev->level==RAID0) {
+		if(raid_io->type == SPDK_BDEV_IO_TYPE_UNMAP)
+			bdev_io_unmap_poller(raid_io->raid_bdev, true);
+		else
+			bdev_io_unmap_poller(raid_io->raid_bdev, false);
 	}
 }
 
@@ -903,30 +976,6 @@ raid_bdev_io_init(struct raid_bdev_io *raid_io, struct raid_bdev_io_channel *rai
 	raid_bdev_io_set_default_status(raid_io, SPDK_BDEV_IO_STATUS_SUCCESS);
 }
 
-static int
-bdev_io_unmap_poller(void *arg)
-{
-	struct raid_bdev_io *raid_io = NULL;
-	struct raid_bdev *raid_bdev = (struct raid_bdev *)arg;
-	assert(raid_bdev->level == RAID0);
-	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit) {
-		return SPDK_POLLER_IDLE;
-	}
-
-	spdk_spin_lock(&raid_bdev->used_lock);
-	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {		
-        raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
-		TAILQ_REMOVE(&raid_bdev->unmap_queue, raid_io, entries);
-		// raid_bdev->unmap_inflight++;
-	}
-	spdk_spin_unlock(&raid_bdev->used_lock);
-
-	if (raid_io && raid_io->raid_bdev->level == RAID0) {
-		raid_bdev->module->submit_null_payload_request(raid_io);
-		return SPDK_POLLER_BUSY;
-	}
-	return SPDK_POLLER_IDLE;
-}
 
 /*
  * brief:
@@ -980,7 +1029,9 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		if(raid_io->raid_bdev->level == RAID0) {
 			spdk_spin_lock(&raid_io->raid_bdev->used_lock);
 			TAILQ_INSERT_TAIL(&raid_io->raid_bdev->unmap_queue, raid_io, entries);
+			raid_io->raid_bdev->unmap_inflight++;
 			spdk_spin_unlock(&raid_io->raid_bdev->used_lock);
+			bdev_io_unmap_poller(raid_io->raid_bdev, false);	
 		} else {
 			raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
 		}
@@ -1610,7 +1661,7 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		spdk_spin_init(&raid_bdev->used_lock);
 		raid_bdev->io_unmap_limit = io_unmap_limit;
 		raid_bdev->unmap_inflight = 0;
-		raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
+		// raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
 	}
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
 

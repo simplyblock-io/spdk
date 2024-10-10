@@ -8,10 +8,13 @@
 #include "spdk_internal/cunit.h"
 #include "spdk/env.h"
 #include "spdk_internal/mock.h"
+#include "spdk/bdev.h"
+#include "spdk/bdev_module.h"
 #include "thread/thread_internal.h"
 #include "bdev/raid/bdev_raid.c"
 #include "bdev/raid/bdev_raid_rpc.c"
 #include "common/lib/test_env.c"
+
 
 #define MAX_BASE_DRIVES 32
 #define MAX_RAIDS 2
@@ -185,6 +188,7 @@ DEFINE_STUB(spdk_json_write_named_uuid, int, (struct spdk_json_write_ctx *w, con
 		const struct spdk_uuid *val), 0);
 DEFINE_STUB_V(raid_bdev_init_superblock, (struct raid_bdev *raid_bdev));
 DEFINE_STUB(raid_bdev_alloc_superblock, int, (struct raid_bdev *raid_bdev, uint32_t block_size), 0);
+DEFINE_STUB(spdk_bdev_io_get_io_channel, struct spdk_io_channel *, (struct spdk_bdev_io *bdev_io), NULL);
 DEFINE_STUB_V(raid_bdev_free_superblock, (struct raid_bdev *raid_bdev));
 DEFINE_STUB(spdk_bdev_readv_blocks_ext, int, (struct spdk_bdev_desc *desc,
 		struct spdk_io_channel *ch, struct iovec *iov, int iovcnt, uint64_t offset_blocks,
@@ -365,6 +369,11 @@ spdk_bdev_reset(struct spdk_bdev_desc *desc, struct spdk_io_channel *ch,
 
 	return 0;
 }
+
+// struct spdk_thread *get_thread_from_bdev_io(struct spdk_bdev_io *bdev_io)
+// {    
+//     return spdk_get_thread();
+// }
 
 void
 spdk_bdev_destruct_done(struct spdk_bdev *bdev, int bdeverrno)

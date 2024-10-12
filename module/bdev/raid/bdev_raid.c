@@ -348,9 +348,6 @@ raid_bdev_destroy_cb(void *io_device, void *ctx_buf)
 	}
 	free(raid_ch->base_channel);
 	raid_ch->base_channel = NULL;
-	// if (raid_bdev->level == RAID0) {
-	// 	spdk_poller_unregister(&raid_bdev->poller);
-	// }
 	raid_bdev_ch_process_cleanup(raid_ch);
 }
 
@@ -610,67 +607,100 @@ _raid0_submit_null_payload_request_(void *_raid_io)
 	raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
 }
 
+static void 
+process_queued_io(struct raid_bdev_io *raid_io) {
+	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+    struct spdk_thread *io_thread, *current_thread;
+    struct spdk_bdev_io *bdev_io;   
+	// If there is a valid raid_io retrieved from the queue, process it.
+	if (raid_io && raid_io->raid_bdev->level == RAID0) {
+		bdev_io = spdk_bdev_io_from_ctx(raid_io);
+		io_thread = get_thread_from_bdev_io(bdev_io); // Get the thread associated with this I/O.
+		current_thread = spdk_get_thread(); // Get the current executing thread.
 
-static void
-bdev_io_unmap_poller(struct raid_bdev_io *raid_io, bool unmap_done, bool increase)
-{
-	
-	struct raid_bdev_io *t_raid_io = NULL;
-	struct raid_bdev *raid_bdev =  raid_io->raid_bdev;
-	struct spdk_thread *io_thread, *current_thread;	
-	struct spdk_bdev_io *bdev_io;
-	bool chanage_counter = increase || unmap_done;
-	assert(raid_bdev->level == RAID0);
-	if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit && !unmap_done) {
-		if (chanage_counter) {
-			spdk_spin_lock(&raid_bdev->used_lock);
-			if (increase) {			
-				TAILQ_INSERT_TAIL(&raid_bdev->unmap_queue, raid_io, entries);			
-			} else if (unmap_done) {
-				raid_bdev->unmap_inflight--;
-			}
-			spdk_spin_unlock(&raid_bdev->used_lock);
-		}
-		return;
-	} 
-	
-	if (increase) {
-		spdk_spin_lock(&raid_bdev->used_lock);		
-		raid_bdev->unmap_inflight++;
-		spdk_spin_unlock(&raid_bdev->used_lock);
-		raid_bdev->module->submit_null_payload_request(raid_io);
-		return;
-	}
-
-	spdk_spin_lock(&raid_bdev->used_lock);
-	if (unmap_done) {
-		raid_bdev->unmap_inflight--;
-	}
-
-	if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {		
-        t_raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
-		if (t_raid_io) {
-			raid_bdev->unmap_inflight++;
-		}
-		TAILQ_REMOVE(&raid_bdev->unmap_queue, t_raid_io, entries);
-		
-	}
-	spdk_spin_unlock(&raid_bdev->used_lock);
-
-	if (t_raid_io && t_raid_io->raid_bdev->level == RAID0) {
-		bdev_io = spdk_bdev_io_from_ctx(t_raid_io);
-		io_thread = get_thread_from_bdev_io(bdev_io);
-		current_thread = spdk_get_thread();
-		if(current_thread == io_thread) {
-			raid_bdev->module->submit_null_payload_request(t_raid_io);
+		// Thread Mismatch Handling: Check if the current thread matches the I/O thread.
+		if (current_thread == io_thread) {
+			// If we are in the correct thread, submit the request directly.
+			raid_bdev->module->submit_null_payload_request(raid_io);
 		} else {
-			spdk_thread_send_msg(io_thread, _raid0_submit_null_payload_request_, t_raid_io);
-		}	
+			// If we are not in the correct thread, send the request to the correct thread.
+			spdk_thread_send_msg(io_thread, _raid0_submit_null_payload_request_, raid_io);
+		}
 		return;
 	}
 	return;
 }
 
+static void
+bdev_io_unmap_limiter(struct raid_bdev_io *raid_io, bool unmap_done, bool new_unmap)
+{
+	assert(raid_io != NULL);
+    struct raid_bdev_io *queued_raid_io = NULL;
+    struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+
+    // Ensure the raid_bdev is operating at RAID0 level. This assert is for debugging purposes.
+	assert(raid_bdev != NULL);
+    assert(raid_bdev->level == RAID0);
+
+    // Check if the limit on inflight unmap operations is reached, and the operation isn't complete yet.
+    if (raid_bdev->io_unmap_limit > 0 && raid_bdev->unmap_inflight > raid_bdev->io_unmap_limit && !unmap_done) {        
+        if (new_unmap) {
+            spdk_spin_lock(&raid_bdev->used_lock);
+            // Add the current raid_io to the unmap queue if increase is true.
+            TAILQ_INSERT_TAIL(&raid_bdev->unmap_queue, raid_io, entries);
+            spdk_spin_unlock(&raid_bdev->used_lock);
+        }
+        return;
+    }
+	    
+    // If increase is true, increase the inflight counter and submit the request.
+    if (new_unmap) {
+		bool direct_send = true;
+        spdk_spin_lock(&raid_bdev->used_lock);                
+		if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {
+			TAILQ_INSERT_TAIL(&raid_bdev->unmap_queue, raid_io, entries);
+			queued_raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+        	if (queued_raid_io) {
+            	raid_bdev->unmap_inflight++; // Increase inflight count for the next operation.
+        	}
+			TAILQ_REMOVE(&raid_bdev->unmap_queue, queued_raid_io, entries); // Remove it from the queue.
+			direct_send = false;			
+		} else {
+			direct_send = true;
+			raid_bdev->unmap_inflight++;
+		}
+        spdk_spin_unlock(&raid_bdev->used_lock);
+
+		if (direct_send) {
+        	raid_bdev->module->submit_null_payload_request(raid_io);        	
+		} else {
+			if (queued_raid_io) {
+				process_queued_io(queued_raid_io);
+			}
+		}
+		return;
+    }
+
+    // If the unmap is completed, decrease the inflight count.
+    if (unmap_done) {
+    	spdk_spin_lock(&raid_bdev->used_lock);
+    	raid_bdev->unmap_inflight--;
+		// If there are more operations in the queue, retrieve and remove the first entry.
+		if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {        
+			queued_raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);
+			if (queued_raid_io) {
+				raid_bdev->unmap_inflight++; // Increase inflight count for the next operation.
+			}
+			TAILQ_REMOVE(&raid_bdev->unmap_queue, queued_raid_io, entries); // Remove it from the queue.
+		}
+		spdk_spin_unlock(&raid_bdev->used_lock);
+
+		if (queued_raid_io) {
+			process_queued_io(queued_raid_io);
+		}
+    	return;
+	}
+}
 
 void
 raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status status)
@@ -719,9 +749,7 @@ raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status sta
 
 	if (raid_io->raid_bdev->level == RAID0) {
 		if (raid_io->type == SPDK_BDEV_IO_TYPE_UNMAP) {
-			bdev_io_unmap_poller(raid_io, true, false);
-		} else {
-			bdev_io_unmap_poller(raid_io, false, false);
+			bdev_io_unmap_limiter(raid_io, true, false);
 		}
 	}
 
@@ -1049,7 +1077,7 @@ raid_bdev_submit_request(struct spdk_io_channel *ch, struct spdk_bdev_io *bdev_i
 		}
 
 		if(raid_io->raid_bdev->level == RAID0) {
-			bdev_io_unmap_poller(raid_io, false, true);	
+			bdev_io_unmap_limiter(raid_io, false, true);	
 		} else {
 			raid_io->raid_bdev->module->submit_null_payload_request(raid_io);
 		}
@@ -1678,8 +1706,7 @@ _raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		TAILQ_INIT(&raid_bdev->unmap_queue);
 		spdk_spin_init(&raid_bdev->used_lock);
 		raid_bdev->io_unmap_limit = io_unmap_limit;
-		raid_bdev->unmap_inflight = 0;
-		// raid_bdev->poller = SPDK_POLLER_REGISTER(bdev_io_unmap_poller, raid_bdev, 0);
+		raid_bdev->unmap_inflight = 0;		
 	}
 	TAILQ_INSERT_TAIL(&g_raid_bdev_list, raid_bdev, global_link);
 

@@ -609,11 +609,12 @@ _raid0_submit_null_payload_request_(void *_raid_io)
 
 static void 
 process_queued_io(struct raid_bdev_io *raid_io) {
-	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
+	struct raid_bdev *raid_bdev;
     struct spdk_thread *io_thread, *current_thread;
     struct spdk_bdev_io *bdev_io;   
 	// If there is a valid raid_io retrieved from the queue, process it.
 	if (raid_io && raid_io->raid_bdev->level == RAID0) {
+		raid_bdev = raid_io->raid_bdev;
 		bdev_io = spdk_bdev_io_from_ctx(raid_io);
 		io_thread = get_thread_from_bdev_io(bdev_io); // Get the thread associated with this I/O.
 		current_thread = spdk_get_thread(); // Get the current executing thread.
@@ -656,7 +657,7 @@ bdev_io_unmap_limiter(struct raid_bdev_io *raid_io, bool unmap_done, bool new_un
     // If increase is true, increase the inflight counter and submit the request.
     if (new_unmap) {
 		bool direct_send = true;
-        spdk_spin_lock(&raid_bdev->used_lock);                
+        spdk_spin_lock(&raid_bdev->used_lock);
 		if (!TAILQ_EMPTY(&raid_bdev->unmap_queue)) {
 			TAILQ_INSERT_TAIL(&raid_bdev->unmap_queue, raid_io, entries);
 			queued_raid_io = TAILQ_FIRST(&raid_bdev->unmap_queue);

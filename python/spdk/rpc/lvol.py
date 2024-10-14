@@ -106,7 +106,7 @@ def bdev_lvol_set_priority_class(client, lvol_name, lvol_priority_class):
     nbits_priority_class = 4
     min_priority_class = 0
     max_priority_class = 2**(nbits_priority_class) - 1
-    if not (lvol_priority_class >= min_priority_class and priority_class <= max_priority_class):
+    if not (lvol_priority_class >= min_priority_class and lvol_priority_class <= max_priority_class):
         raise ValueError("lvol_priority_class must be in the range [{}, {}]".format(min_priority_class, max_priority_class))
     params = {'lvol_name': lvol_name, 'lvol_priority_class': lvol_priority_class}
     return client.call('bdev_lvol_set_priority_class', params)

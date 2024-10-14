@@ -148,6 +148,7 @@ struct raid_bdev_io {
 	enum spdk_bdev_io_status	base_bdev_io_status;
 	/* This will be the raid_io completion status unless any base io's status is different. */
 	enum spdk_bdev_io_status	base_bdev_io_status_default;
+	TAILQ_ENTRY(raid_bdev_io) entries;
 
 	/* Private data for the raid module */
 	void				*module_private;
@@ -199,6 +200,12 @@ struct raid_bdev {
 
 	/* strip size of raid bdev in blocks */
 	uint32_t			strip_size;
+
+	/* unmap io number inflight */
+	uint32_t			unmap_inflight;
+	uint32_t 			io_unmap_limit;	
+	struct spdk_spinlock		used_lock;
+	TAILQ_HEAD(unmap_io_queue, raid_bdev_io) unmap_queue;
 
 	/* strip size of raid bdev in KB */
 	uint32_t			strip_size_kb;
@@ -262,7 +269,7 @@ typedef void (*raid_bdev_destruct_cb)(void *cb_ctx, int rc);
 
 int raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 		     enum raid_level level, bool superblock, const struct spdk_uuid *uuid,
-		     struct raid_bdev **raid_bdev_out);
+		     struct raid_bdev **raid_bdev_out, uint32_t io_unmap_limit);
 void raid_bdev_delete(struct raid_bdev *raid_bdev, raid_bdev_destruct_cb cb_fn, void *cb_ctx);
 int raid_bdev_add_base_bdev(struct raid_bdev *raid_bdev, const char *name,
 			    raid_base_bdev_cb cb_fn, void *cb_ctx);

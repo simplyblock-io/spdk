@@ -937,6 +937,7 @@ blob_parse_extent_page(struct spdk_blob_md_page *extent_page, struct spdk_blob *
 	assert(blob->state == SPDK_BLOB_STATE_LOADING);
 
 	if (bs_load_cur_extent_page_valid(extent_page) == false) {
+		SPDK_INFOLOG(blob, "third step: Openning blobs....7failed id: %lu \n", blob->id);
 		return -ENOENT;
 	}
 
@@ -989,6 +990,7 @@ blob_parse(const struct spdk_blob_md_page *pages, uint32_t page_count,
 
 		rc = blob_parse_page(page, blob);
 		if (rc != 0) {
+			SPDK_INFOLOG(blob, "third step: Openning blobs....4failed\n");
 			return rc;
 		}
 	}
@@ -1442,7 +1444,9 @@ blob_load_final(struct spdk_blob_load_ctx *ctx, int bserrno)
 	if (bserrno == 0) {
 		blob_mark_clean(blob);
 	}
-
+	if (bserrno != 0) {
+		SPDK_INFOLOG(blob, "third step: Openning blobs....6failed id: %lu \n", blob->id);
+	}
 	ctx->cb_fn(ctx->seq, ctx->cb_arg, bserrno);
 
 	/* Free the memory */
@@ -1606,6 +1610,7 @@ blob_load_cpl_extents_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 
 		bserrno = blob_parse_extent_page(page, blob);
 		if (bserrno) {
+			SPDK_INFOLOG(blob, "third step: Openning blobs....8failed id: %lu \n", blob->id);
 			blob_load_final(ctx, bserrno);
 			return;
 		}
@@ -1705,6 +1710,7 @@ blob_load_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	/* Parse the pages */
 	rc = blob_parse(ctx->pages, ctx->num_pages, blob);
 	if (rc) {
+		SPDK_INFOLOG(blob, "third step: Openning blobs....5failed\n");
 		blob_load_final(ctx, rc);
 		return;
 	}
@@ -3985,7 +3991,7 @@ static void
 bs_load_ctx_fail(struct spdk_bs_load_ctx *ctx, int bserrno)
 {
 	assert(bserrno != 0);
-
+	SPDK_INFOLOG(blob, "blobstore load ctx failed\n");
 	spdk_free(ctx->super);
 	bs_sequence_finish(ctx->seq, bserrno);
 	bs_free(ctx->bs);
@@ -4267,6 +4273,7 @@ bs_load_iter(void *arg, struct spdk_blob *blob, int bserrno)
 		spdk_bs_open_blob(ctx->bs, *(spdk_blob_id *)value, bs_examine_clone, ctx);
 		return;
 	} else if (bserrno == -ENOENT) {
+		SPDK_INFOLOG(blob, "second step: openning failed\n");
 		bserrno = 0;
 	} else {
 		/*
@@ -4664,7 +4671,7 @@ bs_load_write_used_clusters_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserr
 		bs_load_ctx_fail(ctx, bserrno);
 		return;
 	}
-
+	SPDK_INFOLOG(blob, "second step: openning the blobs \n");
 	bs_load_complete(ctx);
 }
 
@@ -4722,7 +4729,7 @@ bs_load_replay_md_chain_cpl(struct spdk_bs_load_ctx *ctx)
 		ctx->cur_page = ctx->page_index;
 		bs_load_replay_cur_md_page(ctx);
 	} else {
-		SPDK_INFOLOG(blob, "RECOVERY DONE....\n");
+		SPDK_INFOLOG(blob, "Read the md pages done...\n");
 		/* Claim all of the clusters used by the metadata */
 		num_md_clusters = spdk_divide_round_up(
 					  ctx->super->md_start + ctx->super->md_len, ctx->bs->pages_per_cluster);
@@ -4822,8 +4829,7 @@ bs_load_replay_md_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 			bs_claim_md_page(ctx->bs, page_num);
 			spdk_spin_unlock(&ctx->bs->used_lock);
 			if (page->sequence_num == 0) {
-				SPDK_NOTICELOG("Recover: blob 0x%" PRIx32 "\n", page_num);
-				SPDK_INFOLOG(blob, "Recover: blob 0x%" PRIx32 "\n", page_num);
+				SPDK_INFOLOG(blob, "Recover: blob 0x%" PRIx32 "\n", page_num);			
 				spdk_bit_array_set(ctx->bs->used_blobids, page_num);
 			}
 			if (bs_load_replay_md_parse_page(ctx, page)) {
@@ -4877,8 +4883,7 @@ bs_recover(struct spdk_bs_load_ctx *ctx)
 {
 	int		rc;
 
-	SPDK_NOTICELOG("Performing recovery on blobstore\n");
-	SPDK_INFOLOG(blob, "Performing recovery on blobstore\n");
+	SPDK_NOTICELOG("Performing recovery on blobstore--no gracefully\n");	
 	rc = spdk_bit_array_resize(&ctx->bs->used_md_pages, ctx->super->md_len);
 	if (rc < 0) {
 		bs_load_ctx_fail(ctx, -ENOMEM);
@@ -8546,6 +8551,7 @@ bs_open_blob_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 	struct spdk_blob *existing;
 
 	if (bserrno != 0) {
+		SPDK_INFOLOG(blob, "third step: Openning blobs....3failed\n");
 		blob_free(blob);
 		seq->cpl.u.blob_handle.blob = NULL;
 		bs_sequence_finish(seq, bserrno);
@@ -8607,12 +8613,13 @@ bs_open_blob(struct spdk_blob_store *bs,
 	uint32_t			page_num;
 
 	SPDK_DEBUGLOG(blob, "Opening blob 0x%" PRIx64 "\n", blobid);
-	SPDK_INFOLOG(blob, "Opening blob 0x%" PRIx64 "\n", blobid);	
+
 	assert(spdk_get_thread() == bs->md_thread);
 
 	page_num = bs_blobid_to_page(blobid);
 	if (spdk_bit_array_get(bs->used_blobids, page_num) == false) {
 		/* Invalid blobid */
+		SPDK_INFOLOG(blob, "third step: Openning blobs....1failed\n");
 		cb_fn(cb_arg, NULL, -ENOENT);
 		return;
 	}
@@ -8626,6 +8633,7 @@ bs_open_blob(struct spdk_blob_store *bs,
 
 	blob = blob_alloc(bs, blobid);
 	if (!blob) {
+		SPDK_INFOLOG(blob, "third step: Openning blobs....2failed\n");
 		cb_fn(cb_arg, NULL, -ENOMEM);
 		return;
 	}
@@ -9230,8 +9238,8 @@ bs_iter_cpl(void *cb_arg, struct spdk_blob *_blob, int bserrno)
 	ctx->page_num++;
 	ctx->page_num = spdk_bit_array_find_first_set(bs->used_blobids, ctx->page_num);
 	if (ctx->page_num >= spdk_bit_array_capacity(bs->used_blobids)) {
+		SPDK_INFOLOG(blob, "Openning blobs done....\n");
 		ctx->cb_fn(ctx->cb_arg, NULL, -ENOENT);
-		SPDK_INFOLOG(blob, "OPENNING BLOBS DONE....\n");
 		free(ctx);
 		return;
 	}

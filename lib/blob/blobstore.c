@@ -3855,6 +3855,8 @@ struct spdk_bs_load_ctx {
 	uint32_t			*extent_page_num;
 	struct spdk_blob_md_page	*extent_pages;
 	struct spdk_bit_array		*used_clusters;
+	uint64_t 			bit_idx;
+	void				*one_page;
 
 	spdk_bs_sequence_t			*seq;
 	spdk_blob_op_with_handle_complete	iter_cb_fn;
@@ -4062,6 +4064,98 @@ bs_write_used_md(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl cb_fn)
 	lba = bs_page_to_lba(ctx->bs, ctx->super->used_page_mask_start);
 	lba_count = bs_page_to_lba(ctx->bs, ctx->super->used_page_mask_len);
 	bs_sequence_write_dev(seq, ctx->mask, lba, lba_count, cb_fn, arg);
+}
+
+
+static void
+bs_write_used_md_one_page(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl cb_fn)
+{
+	struct spdk_bs_load_ctx	*ctx = arg;
+	uint64_t first_bit_inpage, last_bit_inpage, pageidx, lba;
+
+	if (ctx->bit_idx < SPDK_BS_MD_STRUCT_INBIT || ctx->bit_idx - SPDK_BS_MD_STRUCT_INBIT < SPDK_BS_PAGE_SIZE_INBIT) {
+		pageidx = 0;
+		first_bit_inpage = 0;
+		last_bit_inpage = SPDK_BS_PAGE_SIZE_INBIT - SPDK_BS_MD_STRUCT_INBIT;
+		ctx->mask = spdk_zmalloc(SPDK_BS_PAGE_SIZE, 0x1000, NULL,
+				 	SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+		if (!ctx->mask) {
+			bs_load_ctx_fail(ctx, -ENOMEM);
+			return;
+		}
+		ctx->mask->type = SPDK_MD_MASK_TYPE_USED_PAGES;
+		ctx->mask->length = ctx->super->md_len;
+		assert(ctx->mask->length == spdk_bit_array_capacity(ctx->bs->used_md_pages));
+		spdk_bit_array_store_mask_one_page(ctx->bs->used_md_pages,
+	 				ctx->mask->mask, first_bit_inpage, last_bit_inpage);
+		lba = bs_page_to_lba(ctx->bs, ctx->super->used_page_mask_start);
+		bs_sequence_write_dev(seq, ctx->mask, lba, 1, cb_fn, arg);
+		return;
+	}
+	pageidx = (ctx->bit_idx - SPDK_BS_MD_STRUCT_INBIT) / SPDK_BS_PAGE_SIZE_INBIT;
+	first_bit_inpage = (pageidx * SPDK_BS_PAGE_SIZE_INBIT) - SPDK_BS_MD_STRUCT_INBIT;
+	last_bit_inpage = ((pageidx + 1) * SPDK_BS_PAGE_SIZE_INBIT) - SPDK_BS_MD_STRUCT_INBIT;
+	ctx->one_page = spdk_zmalloc(SPDK_BS_PAGE_SIZE, 0x1000, NULL,
+			SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	if (!ctx->one_page) {
+		bs_load_ctx_fail(ctx, -ENOMEM);
+		return;
+	}
+	spdk_bit_array_store_mask_one_page(ctx->bs->used_md_pages,
+	 				ctx->one_page, first_bit_inpage, last_bit_inpage);
+	lba = bs_page_to_lba(ctx->bs, ctx->super->used_page_mask_start + pageidx);
+	bs_sequence_write_dev(seq, ctx->one_page, lba, 1, cb_fn, arg);
+}
+
+
+static void
+bs_write_used_blobids_one_page(spdk_bs_sequence_t *seq, void *arg, spdk_bs_sequence_cpl cb_fn)
+{
+	struct spdk_bs_load_ctx	*ctx = arg;
+	uint64_t first_bit_inpage, last_bit_inpage, pageidx, lba;
+
+	if (ctx->super->used_blobid_mask_len == 0) {
+		/*
+		 * This is a pre-v3 on-disk format where the blobid mask does not get
+		 *  written to disk.
+		 */
+		cb_fn(seq, arg, 0);
+		return;
+	}
+
+	if (ctx->bit_idx < SPDK_BS_MD_STRUCT_INBIT || ctx->bit_idx - SPDK_BS_MD_STRUCT_INBIT < SPDK_BS_PAGE_SIZE_INBIT) {
+		pageidx = 0;
+		first_bit_inpage = 0;
+		last_bit_inpage = SPDK_BS_PAGE_SIZE_INBIT - SPDK_BS_MD_STRUCT_INBIT;
+		ctx->mask = spdk_zmalloc(SPDK_BS_PAGE_SIZE, 0x1000, NULL,
+				 	SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+		if (!ctx->mask) {
+			bs_load_ctx_fail(ctx, -ENOMEM);
+			return;
+		}
+		ctx->mask->type = SPDK_MD_MASK_TYPE_USED_BLOBIDS;
+		ctx->mask->length = ctx->super->md_len;
+		assert(ctx->mask->length == spdk_bit_array_capacity(ctx->bs->used_blobids));
+		spdk_bit_array_store_mask_one_page(ctx->bs->used_blobids,
+	 				ctx->mask->mask, first_bit_inpage, last_bit_inpage);
+		lba = bs_page_to_lba(ctx->bs, ctx->super->used_blobid_mask_start);
+		bs_sequence_write_dev(seq, ctx->mask, lba, 1, cb_fn, arg);
+		return;
+	}
+
+	pageidx = (ctx->bit_idx - SPDK_BS_MD_STRUCT_INBIT) / SPDK_BS_PAGE_SIZE_INBIT;
+	first_bit_inpage = (pageidx * SPDK_BS_PAGE_SIZE_INBIT) - SPDK_BS_MD_STRUCT_INBIT;
+	last_bit_inpage = ((pageidx + 1) * SPDK_BS_PAGE_SIZE_INBIT) - SPDK_BS_MD_STRUCT_INBIT;
+	ctx->one_page = spdk_zmalloc(SPDK_BS_PAGE_SIZE, 0x1000, NULL,
+			SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	if (!ctx->one_page) {
+		bs_load_ctx_fail(ctx, -ENOMEM);
+		return;
+	}
+	spdk_bit_array_store_mask_one_page(ctx->bs->used_blobids,
+	 				ctx->one_page, first_bit_inpage, last_bit_inpage);
+	lba = bs_page_to_lba(ctx->bs, ctx->super->used_blobid_mask_start + pageidx);
+	bs_sequence_write_dev(seq, ctx->one_page, lba, 1, cb_fn, arg);
 }
 
 static void

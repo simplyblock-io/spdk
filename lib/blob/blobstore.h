@@ -391,6 +391,8 @@ struct spdk_blob_md_page {
 	uint32_t	crc;
 };
 #define SPDK_BS_PAGE_SIZE 0x1000
+#define SPDK_BS_PAGE_SIZE_INBIT  (SPDK_BS_PAGE_SIZE * 8)
+#define SPDK_BS_MD_STRUCT_INBIT  (sizeof(struct spdk_bs_md_mask) * 8)
 SPDK_STATIC_ASSERT(SPDK_BS_PAGE_SIZE == sizeof(struct spdk_blob_md_page), "Invalid md page size");
 
 #define SPDK_BS_MAX_DESC_SIZE SPDK_SIZEOF_MEMBER(struct spdk_blob_md_page, descriptors)

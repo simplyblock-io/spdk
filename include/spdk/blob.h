@@ -512,6 +512,7 @@ void prepare_s3_clusters(struct spdk_blob* blob, uint64_t *clusters, uint32_t nu
 struct spdk_bs_md_journal_stats {
 	bool		enabled;	/* journal present and intercepting */
 	bool		drain_paused;
+	bool		drain_demoted;	/* drain stopped: not the leader */
 	uint32_t	num_slots;
 	uint32_t	used_slots;
 	uint32_t	mem_head;

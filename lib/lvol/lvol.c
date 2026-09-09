@@ -4405,51 +4405,237 @@ fragment_write_cb(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 		set_req_status_and_queued(req,  req->status);
 	}
 }
+#define XFER_ZERO_PAGE_SIZE		4096U
+#define XFER_MAX_REMOTE_WRITE_BYTES	(16U * 4096U) /* 64 KiB */
+
+static inline bool
+xfer_page_is_zero(const void *buf)
+{
+	const uint64_t *p = buf;
+
+	for (uint32_t i = 0; i < XFER_ZERO_PAGE_SIZE / sizeof(uint64_t); i++) {
+		if (p[i] != 0) {
+			return false;
+		}
+	}
+
+	return true;
+}
 
 static int
-submit_req_fragments(struct spdk_lvs_xfer_req *req, struct remote_lvol_info *rmt)
+submit_nonzero_range(struct spdk_lvs_xfer_req *req,
+		     struct remote_lvol_info *rmt,
+		     uint32_t range_start,
+		     uint32_t range_pages,
+		     uint32_t blocklen,
+		     uint32_t page_blocks,
+		     uint32_t max_blocks,
+		     uint32_t *submitted_fragments)
 {
 	struct spdk_bdev_desc *desc = rmt->desc;
 	struct spdk_io_channel *ch = rmt->channel;
-	uint32_t blocklen = spdk_bdev_get_block_size(spdk_bdev_desc_get_bdev(desc));
-	uint64_t max_bytes = 16 * 0x1000;
-	uint32_t max_blocks = max_bytes / blocklen;
-	if (max_blocks == 0) {
-		max_blocks = 1;
-	}
+	uint8_t *range_payload;
+	uint64_t range_lba;
+	uint32_t remaining_blocks;
+	int rc;
 
-	uint32_t remaining = req->len;
-	uint64_t lba = req->dst_offset;
-	uint8_t *payload = (uint8_t *)req->payload;
-	req->fragments_outstanding = 0;
-	req->aggregated_status = 0;
+	range_payload = (uint8_t *)req->payload + ((uint64_t)range_start * XFER_ZERO_PAGE_SIZE);
 
-	while (remaining > 0) {
-		uint32_t frag_blocks = (remaining > max_blocks) ? max_blocks : remaining;
-		uint8_t *frag_payload = payload + ( (req->len - remaining) * blocklen );
+	range_lba = req->dst_offset + ((uint64_t)range_start * page_blocks);
 
-		/* increment fragments counter before submit */
+	remaining_blocks = range_pages * page_blocks;
+
+	while (remaining_blocks > 0) {
+		uint32_t frag_blocks;
+		uint64_t frag_bytes;
+
+		frag_blocks = spdk_min(remaining_blocks, max_blocks);
+
 		req->fragments_outstanding++;
-		// SPDK_NOTICELOG("1- Remote write I/O offset: %" PRIu64 " len: %" PRIu64 " frag: %d t %p\n", req->offset, req->len, req->fragments_outstanding, spdk_get_thread());
-		int rc = spdk_bdev_write_blocks(desc, ch, frag_payload, lba, frag_blocks,
-										fragment_write_cb, req);
+
+		rc = spdk_bdev_write_blocks(desc, ch, range_payload, range_lba,
+					    frag_blocks, fragment_write_cb, req);
 		if (rc != 0) {
-			/* synchronous failure - decrement fragments counter and record error */
 			req->fragments_outstanding--;
 			req->aggregated_status = -EIO;
-			/* handle rc: may want to abort remaining fragments -> but we'll
-			 * record failure and let outstanding fragments finish or cancel */
-			SPDK_ERRLOG("sync write submit failed rc=%d lba=%"PRIu64" blocks=%u\n", rc, lba, frag_blocks);
+
+			SPDK_ERRLOG("sync write submit failed rc=%d lba=%" PRIu64 " blocks=%u outstanding=%u\n",
+				    rc, range_lba, frag_blocks, req->fragments_outstanding);
 			return rc;
 		}
 
-		/* advance */
-		remaining -= frag_blocks;
-		lba += frag_blocks;
+		(*submitted_fragments)++;
+
+		frag_bytes = (uint64_t)frag_blocks * blocklen;
+
+		range_payload += frag_bytes;
+		range_lba += frag_blocks;
+		remaining_blocks -= frag_blocks;
 	}
 
 	return 0;
 }
+
+static int
+submit_req_fragments(struct spdk_lvs_xfer_req *req,
+		     struct remote_lvol_info *rmt)
+{
+	struct spdk_bdev_desc *desc;
+	struct spdk_bdev *bdev;
+	uint8_t *payload;
+	uint32_t blocklen;
+	uint32_t page_blocks;
+	uint32_t max_blocks;
+	uint32_t num_pages;
+	uint32_t range_start = 0;
+	uint32_t range_pages = 0;
+	uint32_t submitted_fragments = 0;
+	uint32_t zero_pages = 0;
+	uint32_t data_pages = 0;
+	uint64_t total_bytes;
+	int rc;
+
+	if (!req || !rmt || !rmt->desc || !rmt->channel) {
+		return -EINVAL;
+	}
+
+	desc = rmt->desc;
+
+	payload = (uint8_t *)req->payload;
+
+	bdev = spdk_bdev_desc_get_bdev(desc);
+	blocklen = spdk_bdev_get_block_size(bdev);
+
+	if (blocklen == 0 || XFER_ZERO_PAGE_SIZE % blocklen != 0) {
+		SPDK_ERRLOG("Invalid remote block size %u\n", blocklen);
+		return -EINVAL;
+	}
+
+	page_blocks = XFER_ZERO_PAGE_SIZE / blocklen;
+	max_blocks = XFER_MAX_REMOTE_WRITE_BYTES / blocklen;
+
+	if (max_blocks == 0) {
+		max_blocks = 1;
+	}
+
+	total_bytes = (uint64_t)req->len * blocklen;
+
+	if (total_bytes == 0 ||
+	    total_bytes % XFER_ZERO_PAGE_SIZE != 0) {
+		SPDK_ERRLOG("Invalid sparse request size %" PRIu64 "\n", total_bytes);
+		return -EINVAL;
+	}
+
+	num_pages = total_bytes / XFER_ZERO_PAGE_SIZE;
+
+	req->fragments_outstanding = 0;
+	req->aggregated_status = 0;
+
+	for (uint32_t page = 0; page < num_pages; page++) {
+		uint8_t *page_payload = payload + ((uint64_t)page * XFER_ZERO_PAGE_SIZE);
+
+		if (!xfer_page_is_zero(page_payload)) {
+			data_pages++;
+
+			/* Start a new contiguous data range. */
+			if (range_pages == 0) {
+				range_start = page;
+			}
+
+			range_pages++;
+			continue;
+		}
+
+		zero_pages++;
+
+		/*
+		 * Zero page closes the current non-zero range.
+		 */
+		if (range_pages > 0) {
+			rc = submit_nonzero_range(req, rmt, range_start, range_pages, blocklen,
+						page_blocks, max_blocks, &submitted_fragments);
+			if (rc != 0) {
+				return rc;
+			}
+
+			range_pages = 0;
+		}
+	}
+
+	/*
+	 * The cluster may end with a non-zero range.
+	 */
+	if (range_pages > 0) {
+		rc = submit_nonzero_range(req, rmt, range_start, range_pages, blocklen,
+						page_blocks, max_blocks, &submitted_fragments);
+		if (rc != 0) {
+			return rc;
+		}
+	}
+
+	/*
+	 * Entire request was zero, so there will be no write completion.
+	 */
+	if (submitted_fragments == 0) {
+		req->aggregated_status = 0;
+		req->status = XFER_REQ_STATUS_DONE;
+
+		SPDK_NOTICELOG("Sparse xfer: request completely zero, offset=%" PRIu64 " len=%" PRIu64 "\n",
+			       req->dst_offset, req->len);
+
+		set_req_status_and_queued(req, req->status);
+	}
+
+	SPDK_NOTICELOG("Sparse xfer: pages=%u data=%u zero=%u fragments=%u offset=%" PRIu64 "\n",
+		       num_pages, data_pages, zero_pages, submitted_fragments, req->dst_offset);
+
+	return 0;
+}
+
+// static int
+// submit_req_fragments(struct spdk_lvs_xfer_req *req, struct remote_lvol_info *rmt)
+// {
+// 	struct spdk_bdev_desc *desc = rmt->desc;
+// 	struct spdk_io_channel *ch = rmt->channel;
+// 	uint32_t blocklen = spdk_bdev_get_block_size(spdk_bdev_desc_get_bdev(desc));
+// 	uint64_t max_bytes = 16 * 0x1000;
+// 	uint32_t max_blocks = max_bytes / blocklen;
+// 	if (max_blocks == 0) {
+// 		max_blocks = 1;
+// 	}
+
+// 	uint32_t remaining = req->len;
+// 	uint64_t lba = req->dst_offset;
+// 	uint8_t *payload = (uint8_t *)req->payload;
+// 	req->fragments_outstanding = 0;
+// 	req->aggregated_status = 0;
+
+// 	while (remaining > 0) {
+// 		uint32_t frag_blocks = (remaining > max_blocks) ? max_blocks : remaining;
+// 		uint8_t *frag_payload = payload + ( (req->len - remaining) * blocklen );
+
+// 		/* increment fragments counter before submit */
+// 		req->fragments_outstanding++;
+// 		// SPDK_NOTICELOG("1- Remote write I/O offset: %" PRIu64 " len: %" PRIu64 " frag: %d t %p\n", req->offset, req->len, req->fragments_outstanding, spdk_get_thread());
+// 		int rc = spdk_bdev_write_blocks(desc, ch, frag_payload, lba, frag_blocks,
+// 										fragment_write_cb, req);
+// 		if (rc != 0) {
+// 			/* synchronous failure - decrement fragments counter and record error */
+// 			req->fragments_outstanding--;
+// 			req->aggregated_status = -EIO;
+// 			/* handle rc: may want to abort remaining fragments -> but we'll
+// 			 * record failure and let outstanding fragments finish or cancel */
+// 			SPDK_ERRLOG("sync write submit failed rc=%d lba=%"PRIu64" blocks=%u\n", rc, lba, frag_blocks);
+// 			return rc;
+// 		}
+
+// 		/* advance */
+// 		remaining -= frag_blocks;
+// 		lba += frag_blocks;
+// 	}
+
+// 	return 0;
+// }
 
 static int
 submit_rw_reqs_remote(struct spdk_lvs_xfer_req *req)
@@ -6958,8 +7144,12 @@ spdk_lvol_transfer(struct spdk_lvol *lvol, uint64_t offset, uint32_t cluster_bat
 	SPDK_NOTICELOG("Transfer lvol %s %s task: last offset %" PRIu64 " status %s start.\n", task->lvol->name,
 		 			xfer_type_to_string(task->type), task->lvol->last_offset,
 					xfer_result_type_to_string(task->lvol->transfer_status));
-	task->tmo_poller =  spdk_poller_register(spdk_lvol_transfer_delay, task, 50000);// 50ms
-	// TAILQ_INSERT_TAIL(&g_lvs_xfer_tasks, task, entry);
+
+	if (task->final_step) {
+		task->tmo_poller =  spdk_poller_register(spdk_lvol_transfer_delay, task, 50000);// 50ms
+	} else {
+		TAILQ_INSERT_TAIL(&g_lvs_xfer_tasks, task, entry);
+	}
 	return 0;
 }
 

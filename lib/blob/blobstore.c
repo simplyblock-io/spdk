@@ -25,6 +25,7 @@
 #include "blobstore.h"
 
 #define BLOB_CRC32C_INITIAL    0xffffffffUL
+#define BLOB_CLEAR_EXTENTS_BATCH_SIZE 500
 
 static int bs_register_md_thread(struct spdk_blob_store *bs);
 static int bs_unregister_md_thread(struct spdk_blob_store *bs);
@@ -2300,6 +2301,8 @@ struct spdk_blob_persist_ctx {
 
 	struct spdk_bit_page	*bit_page;
 	uint64_t 			idx_blobids;
+	uint64_t 			idx_extents;
+	int 				rc;
 	spdk_bs_sequence_t		*bit_seq_persist;
 	spdk_bs_sequence_cpl	bit_cb_fn_persist;
 
@@ -2478,29 +2481,116 @@ blob_persist_clear_extents_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrn
 }
 
 static void
-blob_persist_clear_extents(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx *ctx)
+blob_persist_clear_extents_partial(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx *ctx);
+
+static void
+blob_persist_clear_extents_partial_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
-	struct spdk_blob		*blob = ctx->blob;
-	struct spdk_blob_store		*bs = blob->bs;
-	size_t				i;
-	uint64_t                        lba;
-	uint64_t                        lba_count;
-	spdk_bs_batch_t                 *batch;
+	struct spdk_blob_persist_ctx *ctx = cb_arg;
+	struct spdk_blob *blob = ctx->blob;
 
-	batch = bs_sequence_to_batch(seq, 0, blob_persist_clear_extents_cpl, ctx);
-	lba_count = bs_byte_to_lba(bs, SPDK_BS_PAGE_SIZE);
+	if (bserrno != 0) {
+		SPDK_ERRLOG("Failed to clear extent pages, rc=%d\n", bserrno);
 
-	/* Clear all extent_pages that were truncated */
-	for (i = blob->active.num_extent_pages; i < blob->active.extent_pages_array_size; i++) {
-		/* Nothing to clear if it was not allocated */
-		if (blob->active.extent_pages[i] != 0) {
-			lba = bs_md_page_to_lba(bs, blob->active.extent_pages[i]);
-			bs->w_io++;
-			bs_batch_write_zeroes_dev(batch, lba, lba_count);
+		if (ctx->rc == 0) {
+			ctx->rc = bserrno;
 		}
+
+		/*
+		 * Do not submit additional zero operations after an error.
+		 */
+		blob_persist_clear_extents_cpl(seq, ctx, ctx->rc);
+		return;
 	}
 
+	/*
+	 * idx_extents always points to the next extent-array entry
+	 * that has not yet been inspected.
+	 */
+	if (ctx->idx_extents >= blob->active.extent_pages_array_size) {
+
+		blob_persist_clear_extents_cpl(seq, ctx, ctx->rc);
+		return;
+	}
+
+	/*
+	 * Submit next group of at most 500 zero-write requests.
+	 */
+	blob_persist_clear_extents_partial(seq, ctx);
+}
+
+
+static void
+blob_persist_clear_extents_partial(spdk_bs_sequence_t *seq,
+				   struct spdk_blob_persist_ctx *ctx)
+{
+	struct spdk_blob *blob = ctx->blob;
+	struct spdk_blob_store *bs = blob->bs;
+	spdk_bs_batch_t *batch;
+	uint64_t lba;
+	uint64_t lba_count;
+	uint32_t submitted = 0;
+	uint32_t i;
+
+	batch = bs_sequence_to_batch(seq, 0, blob_persist_clear_extents_partial_cpl, ctx);
+
+	if (batch == NULL) {
+		if (ctx->rc == 0) {
+			ctx->rc = -ENOMEM;
+		}
+
+		blob_persist_clear_extents_cpl(seq, ctx, ctx->rc);
+		return;
+	}
+
+	lba_count = bs_byte_to_lba(bs, SPDK_BS_PAGE_SIZE);
+
+	while (ctx->idx_extents < blob->active.extent_pages_array_size && submitted < BLOB_CLEAR_EXTENTS_BATCH_SIZE) {
+
+		i = ctx->idx_extents;
+		ctx->idx_extents++;
+
+		if (blob->active.extent_pages[i] == 0) {
+			continue;
+		}
+
+		lba = bs_md_page_to_lba(bs, blob->active.extent_pages[i]);
+		bs->w_io++;
+		bs_batch_write_zeroes_dev(batch, lba, lba_count);
+		submitted++;
+	}
+
+	// SPDK_DEBUGLOG(blob,
+	// 	      "Clear extents batch: submitted=%u "
+	// 	      "next_idx=%zu total=%zu\n",
+	// 	      submitted,
+	// 	      ctx->idx_extents,
+	// 	      blob->active.extent_pages_array_size);
+
 	bs_batch_close(batch);
+}
+
+static void
+blob_persist_clear_extents(spdk_bs_sequence_t *seq, struct spdk_blob_persist_ctx *ctx)
+{
+	struct spdk_blob *blob = ctx->blob;
+
+	/*
+	 * Everything before num_extent_pages was retained.
+	 * Start clearing truncated extent-page entries from here.
+	 */
+	ctx->idx_extents = blob->active.num_extent_pages;
+
+	if (ctx->idx_extents >= blob->active.extent_pages_array_size) {
+
+		/*
+		 * Nothing to clear.
+		 */
+		blob_persist_clear_extents_cpl(seq, ctx, 0);
+		return;
+	}
+
+	blob_persist_clear_extents_partial(seq, ctx);
 }
 
 static void

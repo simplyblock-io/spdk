@@ -26,6 +26,8 @@
 
 #define BLOB_CRC32C_INITIAL    0xffffffffUL
 #define BLOB_CLEAR_EXTENTS_BATCH_SIZE 500
+#define BS_UPDATE_EXTENT_BATCH_SIZE 2048
+#define BS_UPDATE_SET_MDS_TIME_MS	500
 
 static int bs_register_md_thread(struct spdk_blob_store *bs);
 static int bs_unregister_md_thread(struct spdk_blob_store *bs);
@@ -14472,8 +14474,6 @@ bs_update_write_used_md(struct spdk_bs_update_ctx *ctx)
 	bs_write_used_md_on_failover(ctx->seq, ctx, bs_update_write_used_pages_cpl);
 }
 
-#define BS_UPDATE_SET_MDS_TIME_MS	500
-
 static inline bool
 bs_update_set_mds_timeout(uint64_t start_ticks, uint64_t timeout_ticks)
 {
@@ -14493,7 +14493,6 @@ bs_update_blob_set_mds(void *cb_args) {
 	timeout_ticks = (spdk_get_ticks_hz() * BS_UPDATE_SET_MDS_TIME_MS) / 1000;
 
 	spdk_spin_lock(&bs->used_lock);
-
 
 	/*
 	 * Stage 1:
@@ -14571,7 +14570,7 @@ bs_update_blob_set_mds(void *cb_args) {
 
 		while (idx != UINT32_MAX) {
 
-			spdk_bit_pool_allocate_specific_bit(bs->used_clusters, idx);
+			spdk_bit_pool_set_bit_no_update(bs->used_clusters, idx);
 			if (idx == UINT32_MAX - 1) {
 				ctx->set_clusters_idx = UINT32_MAX;
 				break;
@@ -14588,6 +14587,7 @@ bs_update_blob_set_mds(void *cb_args) {
 			idx = spdk_bit_array_find_first_set(ctx->used_clusters, ctx->set_clusters_idx);
 		}
 
+		spdk_bit_pool_update_lowest_free_bit(bs->used_clusters);
 		ctx->set_mds_stage = BS_UPDATE_SET_DONE;
 	}
 
@@ -14677,23 +14677,6 @@ bs_update_replay_md_chain_cpl(struct spdk_bs_update_ctx *ctx)
 	}
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#define BS_UPDATE_EXTENT_BATCH_SIZE 4096
-
 static void
 bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx);
 
@@ -14776,7 +14759,6 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 	ctx->extent_page_idx = 0;
 	bs_update_replay_md_chain_cpl(ctx);
 }
-
 
 static void
 bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx)

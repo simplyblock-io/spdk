@@ -13831,6 +13831,13 @@ struct spdk_bs_update_failover_ctx {
 	struct spdk_blob		*blob;
 };
 
+enum bs_update_set_mds_stage {
+	BS_UPDATE_SET_MD_PAGES = 0,
+	BS_UPDATE_SET_BLOBIDS,
+	BS_UPDATE_SET_CLUSTERS,
+	BS_UPDATE_SET_DONE,
+};
+
 struct spdk_bs_update_ctx {
 	struct spdk_blob_store		*bs;
 	struct spdk_bs_super_block	*super;
@@ -13847,7 +13854,14 @@ struct spdk_bs_update_ctx {
 	struct spdk_bit_array		*used_clusters;
 
 	struct spdk_bit_array		*used_blobids;
-	uint64_t			new_blobid;
+	uint64_t					new_blobid;
+	enum bs_update_set_mds_stage set_mds_stage;
+
+	uint32_t set_mds_idx;
+	uint32_t set_blobids_idx;
+	uint32_t set_clusters_idx;
+
+	struct spdk_poller *poller;
 
 	struct spdk_bit_array		*used_md_pages;
 	struct spdk_bit_array		*synnced_used_blobid_pages;
@@ -14455,6 +14469,141 @@ bs_update_write_used_md(struct spdk_bs_update_ctx *ctx)
 	bs_write_used_md_on_failover(ctx->seq, ctx, bs_update_write_used_pages_cpl);
 }
 
+#define BS_UPDATE_SET_MDS_TIME_MS	500
+
+static inline bool
+bs_update_set_mds_timeout(uint64_t start_ticks, uint64_t timeout_ticks)
+{
+	return spdk_get_ticks() - start_ticks >= timeout_ticks;
+}
+
+static int
+bs_update_blob_set_mds(void *cb_args) {
+	struct spdk_bs_update_ctx *ctx = cb_args;
+	struct spdk_blob_store *bs = ctx->bs;
+	uint64_t start_ticks;
+	uint64_t timeout_ticks;
+	uint32_t idx;
+
+	start_ticks = spdk_get_ticks();
+
+	timeout_ticks = (spdk_get_ticks_hz() * BS_UPDATE_SET_MDS_TIME_MS) / 1000;
+
+	spdk_spin_lock(&bs->used_lock);
+
+
+	/*
+	 * Stage 1:
+	 * Merge used metadata pages.
+	 */
+	if (ctx->set_mds_stage == BS_UPDATE_SET_MD_PAGES) {
+
+		idx = spdk_bit_array_find_first_set(ctx->used_md_pages, ctx->set_mds_idx);
+
+		while (idx != UINT32_MAX) {
+
+			spdk_bit_array_set(bs->used_md_pages, idx);
+			/*
+			 * Resume from the next bit on the next iteration/poll.
+			 */
+			if (idx == UINT32_MAX - 1) {
+				ctx->set_mds_idx = UINT32_MAX;
+				break;
+			}
+
+			ctx->set_mds_idx = idx + 1;
+
+			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
+				spdk_spin_unlock(&bs->used_lock);
+				return SPDK_POLLER_BUSY;
+			}
+
+			idx = spdk_bit_array_find_first_set(ctx->used_md_pages, ctx->set_mds_idx);
+		}
+
+		ctx->set_mds_stage = BS_UPDATE_SET_BLOBIDS;
+		ctx->set_blobids_idx = 0;
+	}
+
+	/*
+	 * Stage 2:
+	 * Merge used blob IDs.
+	 */
+	if (ctx->set_mds_stage == BS_UPDATE_SET_BLOBIDS) {
+
+		idx = spdk_bit_array_find_first_set(ctx->used_blobids, ctx->set_blobids_idx);
+
+		while (idx != UINT32_MAX) {
+
+			spdk_bit_array_set(bs->used_blobids, idx);
+
+			if (idx == UINT32_MAX - 1) {
+				ctx->set_blobids_idx = UINT32_MAX;
+				break;
+			}
+
+			ctx->set_blobids_idx = idx + 1;
+
+			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
+				spdk_spin_unlock(&bs->used_lock);
+				return SPDK_POLLER_BUSY;
+			}
+
+			idx = spdk_bit_array_find_first_set(ctx->used_blobids, ctx->set_blobids_idx);
+		}
+
+		ctx->set_mds_stage = BS_UPDATE_SET_CLUSTERS;
+		ctx->set_clusters_idx = 0;
+	}
+
+	/*
+	 * Stage 3:
+	 * Merge allocated clusters.
+	 */
+	if (ctx->set_mds_stage == BS_UPDATE_SET_CLUSTERS) {
+
+		idx = spdk_bit_array_find_first_set(ctx->used_clusters, ctx->set_clusters_idx);
+
+		while (idx != UINT32_MAX) {
+
+			spdk_bit_pool_allocate_specific_bit(bs->used_clusters, idx);
+			if (idx == UINT32_MAX - 1) {
+				ctx->set_clusters_idx = UINT32_MAX;
+				break;
+			}
+
+			ctx->set_clusters_idx = idx + 1;
+
+			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
+				spdk_spin_unlock(&bs->used_lock);
+				return SPDK_POLLER_BUSY;
+			}
+
+			idx = spdk_bit_array_find_first_set(ctx->used_clusters, ctx->set_clusters_idx);
+		}
+
+		ctx->set_mds_stage = BS_UPDATE_SET_DONE;
+	}
+
+	spdk_spin_unlock(&bs->used_lock);
+
+
+		/*
+	 * Everything has been merged.
+	 */
+	if (ctx->set_mds_stage == BS_UPDATE_SET_DONE) {
+		SPDK_NOTICELOG("Finished setting blobstore used metadata, blob IDs and clusters\n");
+		spdk_poller_unregister(&ctx->poller);
+		spdk_bit_array_free(&ctx->used_clusters);
+		spdk_bit_array_free(&ctx->used_md_pages);
+		spdk_bit_array_free(&ctx->used_blobids);
+		bs_update_live_done(ctx, 0);
+		return -1;
+	}
+
+	return SPDK_POLLER_BUSY;
+}
+
 static void
 bs_update_replay_md_chain_cpl(struct spdk_bs_update_ctx *ctx)
 {
@@ -14464,46 +14613,13 @@ bs_update_replay_md_chain_cpl(struct spdk_bs_update_ctx *ctx)
 	ctx->in_page_chain = false;
 	if (!ctx->failover && ctx->new_blobid) {
 		SPDK_NOTICELOG("Update the blobstore for new blob done.\n");
-		//set md pages
-		uint64_t idx = 0;		
-		spdk_spin_lock(&ctx->bs->used_lock);
-
-		do {
-			idx++;
-			idx = spdk_bit_array_find_first_set(ctx->used_md_pages, idx);
-			if (idx != UINT32_MAX && spdk_bit_array_get(ctx->used_md_pages, idx) == true) {
-				spdk_bit_array_set(ctx->bs->used_md_pages, idx);
-			}
-		} while (idx != UINT32_MAX);
-
-		//set blobids
-		idx = 0;
-		do {
-			idx++;
-			idx = spdk_bit_array_find_first_set(ctx->used_blobids, idx);
-			if (idx != UINT32_MAX && spdk_bit_array_get(ctx->used_blobids, idx) == true) {
-				spdk_bit_array_set(ctx->bs->used_blobids, idx);
-			}
-		} while (idx != UINT32_MAX);
-
-		// set cluster
-		idx = 0;
-		do {
-			idx++;
-			idx = spdk_bit_array_find_first_set(ctx->used_clusters, idx);
-			if (idx != UINT32_MAX && spdk_bit_array_get(ctx->used_clusters, idx) == true) {
-				spdk_bit_pool_allocate_specific_bit(ctx->bs->used_clusters, idx);
-			}
-		} while (idx != UINT32_MAX);
-				
-		spdk_spin_unlock(&ctx->bs->used_lock);
-
-		spdk_bit_array_free(&ctx->used_clusters);		
-		spdk_bit_array_free(&ctx->used_md_pages);			
-		spdk_bit_array_free(&ctx->used_blobids);
-		bs_update_live_done(ctx, 0);
+		ctx->set_mds_stage = BS_UPDATE_SET_MD_PAGES;
+		ctx->set_mds_idx = 0;
+		ctx->set_blobids_idx = 0;
+		ctx->set_clusters_idx = 0;
+		ctx->poller = spdk_poller_register(bs_update_blob_set_mds, ctx, 1000); /* 1 ms */
 		return;
-	} 
+	}
 
 	do {
 		ctx->page_index++;

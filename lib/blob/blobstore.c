@@ -14515,6 +14515,7 @@ bs_update_blob_set_mds(void *cb_args) {
 
 			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
 				spdk_spin_unlock(&bs->used_lock);
+				SPDK_NOTICELOG("out of time BS_UPDATE_SET_MD_PAGES\n");
 				return SPDK_POLLER_BUSY;
 			}
 
@@ -14546,6 +14547,7 @@ bs_update_blob_set_mds(void *cb_args) {
 
 			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
 				spdk_spin_unlock(&bs->used_lock);
+				SPDK_NOTICELOG("out of time BS_UPDATE_SET_BLOBIDS\n");
 				return SPDK_POLLER_BUSY;
 			}
 
@@ -14576,6 +14578,7 @@ bs_update_blob_set_mds(void *cb_args) {
 
 			if (bs_update_set_mds_timeout(start_ticks, timeout_ticks)) {
 				spdk_spin_unlock(&bs->used_lock);
+				SPDK_NOTICELOG("out of time BS_UPDATE_SET_CLUSTERS\n");
 				return SPDK_POLLER_BUSY;
 			}
 

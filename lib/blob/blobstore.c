@@ -13873,6 +13873,7 @@ struct spdk_bs_update_ctx {
 	bool				failover;
 
 	spdk_bs_sequence_t		*seq;
+	int rc;
 };
 
 static void
@@ -14681,6 +14682,22 @@ static void
 bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx);
 
 static void
+bs_update_replay_extent_reset(struct spdk_bs_update_ctx *ctx)
+{
+	if (ctx->extent_pages != NULL) {
+		spdk_free(ctx->extent_pages);
+		ctx->extent_pages = NULL;
+	}
+
+	free(ctx->extent_page_num);
+	ctx->extent_page_num = NULL;
+
+	ctx->extent_page_idx = 0;
+	ctx->extent_batch_count = 0;
+	ctx->num_extent_pages = 0;
+}
+
+static void
 bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 {
 	struct spdk_bs_update_ctx *ctx = cb_arg;
@@ -14690,12 +14707,15 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 
 	if (bserrno != 0) {
 		SPDK_ERRLOG("Read extent md page failed, rc=%d\n", bserrno);
-		if (ctx->extent_pages != NULL) {
-			spdk_free(ctx->extent_pages);
-			ctx->extent_pages = NULL;
-		}
-		ctx->extent_batch_count = 0;
+		bs_update_replay_extent_reset(ctx);
 		bs_update_live_done(ctx, -ENOTCONN);
+		return;
+	}
+
+	if (ctx->rc != 0) {
+		SPDK_ERRLOG("Extent page replay failed, rc=%d\n", ctx->rc);
+		bs_update_replay_extent_reset(ctx);
+		bs_update_live_done(ctx, ctx->rc);
 		return;
 	}
 
@@ -14710,7 +14730,6 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 	 */
 	for (i = 0; i < ctx->extent_batch_count; i++) {
 		uint64_t global_idx = batch_start + i;
-
 		/*
 		 * Extent pages are only read when present within
 		 * the chain md. Integrity of md is not right if
@@ -14719,9 +14738,7 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 		if (!bs_load_cur_extent_page_valid(&ctx->extent_pages[i])) {
 			uint64_t lba = bs_md_page_to_lba(ctx->bs, ctx->extent_page_num[global_idx]);
 			SPDK_ERRLOG("Extent page %" PRIu64" is not valid.\n", lba);
-			spdk_free(ctx->extent_pages);
-			ctx->extent_pages = NULL;
-			ctx->extent_batch_count = 0;
+			bs_update_replay_extent_reset(ctx);
 			bs_update_live_done(ctx, -EILSEQ);
 			return;
 		}
@@ -14732,9 +14749,7 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 
 		if (bs_update_replay_md_parse_page(ctx, &ctx->extent_pages[i])) {
 			SPDK_ERRLOG("Extent page parsing encountered an error.\n");
-			spdk_free(ctx->extent_pages);
-			ctx->extent_pages = NULL;
-			ctx->extent_batch_count = 0;
+			bs_update_replay_extent_reset(ctx);
 			bs_update_live_done(ctx, -EILSEQ);
 			return;
 		}
@@ -14748,15 +14763,7 @@ bs_update_replay_extent_page_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bser
 		return;
 	}
 
-	spdk_free(ctx->extent_pages);
-	ctx->extent_pages = NULL;
-	ctx->extent_batch_count = 0;
-	/*
-	 * All extent pages have now been read and parsed.
-	 */
-	free(ctx->extent_page_num);
-	ctx->extent_page_num = NULL;
-	ctx->extent_page_idx = 0;
+	bs_update_replay_extent_reset(ctx);
 	bs_update_replay_md_chain_cpl(ctx);
 }
 
@@ -14776,17 +14783,7 @@ bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx)
 	 */
 	if (ctx->extent_page_idx >= ctx->num_extent_pages) {
 
-		if (ctx->extent_pages != NULL) {
-			spdk_free(ctx->extent_pages);
-			ctx->extent_pages = NULL;
-		}
-
-		free(ctx->extent_page_num);
-		ctx->extent_page_num = NULL;
-
-		ctx->extent_batch_count = 0;
-		ctx->extent_page_idx = 0;
-
+		bs_update_replay_extent_reset(ctx);
 		bs_update_replay_md_chain_cpl(ctx);
 		return;
 	}
@@ -14802,7 +14799,7 @@ bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx)
 
 		if (ctx->extent_pages == NULL) {
 			SPDK_ERRLOG("Could not allocate buffer for reading extent pages.\n");
-			ctx->extent_batch_count = 0;
+			bs_update_replay_extent_reset(ctx);
 			bs_update_live_done(ctx, -ENOMEM);
 			return;
 		}
@@ -14815,7 +14812,13 @@ bs_update_replay_extent_pages(struct spdk_bs_update_ctx *ctx)
 	for (i = 0; i < ctx->extent_batch_count; i++) {
 		uint64_t global_idx = batch_start + i;
 		page = ctx->extent_page_num[global_idx];
-		assert(page < ctx->super->md_len);
+		if (page >= ctx->super->md_len) {
+			SPDK_ERRLOG("Invalid extent page %" PRIu32", md_len=%" PRIu32", global_idx=%" PRIu64
+				", num_extent_pages=%" PRIu64 "\n", page, ctx->super->md_len, global_idx, ctx->num_extent_pages);
+			ctx->rc = -EILSEQ;
+			bs_batch_close(batch);
+			return;
+		}
 		lba = bs_md_page_to_lba(ctx->bs, page);
 		ctx->bs->r_io++;
 		bs_batch_read_dev(batch, &ctx->extent_pages[i], lba, lba_count);
@@ -14871,6 +14874,7 @@ bs_update_replay_md_cpl(spdk_bs_sequence_t *seq, void *cb_arg, int bserrno)
 				ctx->extent_page_idx = 0;
 				ctx->extent_batch_count = 0;
 				ctx->extent_pages = NULL;
+				ctx->rc = 0;
 				bs_update_replay_extent_pages(ctx);
 				return;
 			}
